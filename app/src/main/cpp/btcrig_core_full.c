@@ -5,12 +5,17 @@
 #include "stratum.h"
 
 #include <jansson.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+
+#define CORE_LOG_MAX_BYTES (1024 * 1024)
 
 typedef struct {
     char pool[256];
@@ -26,14 +31,40 @@ typedef struct {
     miner_opencl_config_t opencl;
 } core_config_t;
 
+typedef struct {
+    uint64_t hashes;
+    uint64_t jobs;
+    uint64_t submits;
+    uint64_t accepts;
+    uint64_t rejects;
+    uint64_t base_hashes;
+    uint64_t base_jobs;
+    uint64_t base_submits;
+    uint64_t base_accepts;
+    uint64_t base_rejects;
+    uint64_t conn_hashes;
+    uint64_t conn_jobs;
+    uint64_t conn_submits;
+    uint64_t conn_accepts;
+    uint64_t conn_rejects;
+    double hashrate;
+    double last_time;
+    uint64_t last_hashes;
+    int worker_count;
+    int connected;
+} core_stats_t;
+
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_t g_thread;
 static int g_thread_started = 0;
 static int g_running = 0;
 static volatile int g_stop_requested = 0;
 static core_config_t g_config;
+static core_stats_t g_stats;
 static char g_status[64] = "idle";
 static char g_last_error[128] = "";
+static char g_log_path[512] = "";
+static int g_log_redirected = 0;
 
 int btcrig_android_core_should_stop(void) {
     return g_stop_requested;
@@ -60,6 +91,119 @@ static void set_status(const char *status, const char *error) {
     if (error != NULL) {
         copy_text(g_last_error, sizeof(g_last_error), error);
     }
+    pthread_mutex_unlock(&g_lock);
+}
+
+static void build_log_path(const char *config_path, char *out, size_t out_size) {
+    if (config_path == NULL || config_path[0] == '\0') {
+        copy_text(out, out_size, "btcrig.log");
+        return;
+    }
+
+    const char *slash = strrchr(config_path, '/');
+    if (slash == NULL) {
+        copy_text(out, out_size, "btcrig.log");
+        return;
+    }
+
+    size_t dir_len = (size_t)(slash - config_path);
+    if (dir_len + strlen("/btcrig.log") + 1 > out_size) {
+        copy_text(out, out_size, "btcrig.log");
+        return;
+    }
+    memcpy(out, config_path, dir_len);
+    memcpy(out + dir_len, "/btcrig.log", strlen("/btcrig.log") + 1);
+}
+
+static void redirect_native_log(const char *config_path) {
+    pthread_mutex_lock(&g_lock);
+    if (g_log_redirected) {
+        pthread_mutex_unlock(&g_lock);
+        return;
+    }
+    build_log_path(config_path, g_log_path, sizeof(g_log_path));
+    char path[sizeof(g_log_path)];
+    copy_text(path, sizeof(path), g_log_path);
+    g_log_redirected = 1;
+    pthread_mutex_unlock(&g_lock);
+
+    struct stat st;
+    if (stat(path, &st) == 0 && st.st_size > CORE_LOG_MAX_BYTES) {
+        char rotated[sizeof(g_log_path) + 2];
+        snprintf(rotated, sizeof(rotated), "%s.1", path);
+        rename(path, rotated);
+    }
+
+    int fd = open(path, O_WRONLY | O_CREAT | O_APPEND, 0600);
+    if (fd < 0) {
+        pthread_mutex_lock(&g_lock);
+        snprintf(g_last_error, sizeof(g_last_error), "log open failed: %s", strerror(errno));
+        pthread_mutex_unlock(&g_lock);
+        return;
+    }
+    // ponytail: process-wide redirect; replace with logger callbacks if native libraries need separate sinks.
+    dup2(fd, STDOUT_FILENO);
+    dup2(fd, STDERR_FILENO);
+    close(fd);
+    setvbuf(stdout, NULL, _IOLBF, 0);
+    setvbuf(stderr, NULL, _IONBF, 0);
+}
+
+static void reset_stats(void) {
+    memset(&g_stats, 0, sizeof(g_stats));
+}
+
+static void update_stats(void *opaque, const stratum_snapshot_t *snapshot) {
+    (void)opaque;
+    if (snapshot == NULL) {
+        return;
+    }
+
+    pthread_mutex_lock(&g_lock);
+    if (snapshot->hashes < g_stats.conn_hashes ||
+        snapshot->jobs < g_stats.conn_jobs ||
+        snapshot->submits < g_stats.conn_submits ||
+        snapshot->accepts < g_stats.conn_accepts ||
+        snapshot->rejects < g_stats.conn_rejects) {
+        g_stats.base_hashes += g_stats.conn_hashes;
+        g_stats.base_jobs += g_stats.conn_jobs;
+        g_stats.base_submits += g_stats.conn_submits;
+        g_stats.base_accepts += g_stats.conn_accepts;
+        g_stats.base_rejects += g_stats.conn_rejects;
+        g_stats.last_time = 0.0;
+        g_stats.last_hashes = 0;
+    }
+
+    if (g_stats.last_time > 0.0 && snapshot->now > g_stats.last_time && snapshot->hashes >= g_stats.last_hashes) {
+        g_stats.hashrate = (double)(snapshot->hashes - g_stats.last_hashes) / (snapshot->now - g_stats.last_time);
+    }
+    g_stats.conn_hashes = snapshot->hashes;
+    g_stats.conn_jobs = snapshot->jobs;
+    g_stats.conn_submits = snapshot->submits;
+    g_stats.conn_accepts = snapshot->accepts;
+    g_stats.conn_rejects = snapshot->rejects;
+    g_stats.last_time = snapshot->now;
+    g_stats.last_hashes = snapshot->hashes;
+    g_stats.hashes = g_stats.base_hashes + g_stats.conn_hashes;
+    g_stats.worker_count = snapshot->worker_count;
+    g_stats.connected = snapshot->connected && snapshot->authorized;
+    g_stats.jobs = g_stats.base_jobs + g_stats.conn_jobs;
+    g_stats.submits = g_stats.base_submits + g_stats.conn_submits;
+    g_stats.accepts = g_stats.base_accepts + g_stats.conn_accepts;
+    g_stats.rejects = g_stats.base_rejects + g_stats.conn_rejects;
+    if (snapshot->authorized) {
+        copy_text(g_status, sizeof(g_status), "authorized");
+    } else if (snapshot->subscribed) {
+        copy_text(g_status, sizeof(g_status), "subscribed");
+    } else if (snapshot->connected) {
+        copy_text(g_status, sizeof(g_status), "connected");
+    }
+    pthread_mutex_unlock(&g_lock);
+}
+
+static void mark_disconnected(void) {
+    pthread_mutex_lock(&g_lock);
+    g_stats.connected = 0;
     pthread_mutex_unlock(&g_lock);
 }
 
@@ -283,8 +427,10 @@ static void *run_core(void *opaque) {
         client.enable_mining = 1;
         client.opencl = g_config.opencl;
         client.stats_interval = g_config.stats_interval;
+        client.on_stats = update_stats;
 
         int rc = stratum_run_client(g_config.pool, g_config.user, g_config.pass, g_config.difficulty, &client);
+        mark_disconnected();
         if (g_stop_requested) {
             break;
         }
@@ -322,6 +468,7 @@ int btcrig_core_self_test(void) {
 }
 
 int btcrig_core_start(const char *config_path) {
+    redirect_native_log(config_path);
     core_config_t config = read_config(config_path);
 
     pthread_mutex_lock(&g_lock);
@@ -331,6 +478,7 @@ int btcrig_core_start(const char *config_path) {
     }
     g_stop_requested = 0;
     g_config = config;
+    reset_stats();
     copy_text(g_status, sizeof(g_status), "starting");
     copy_text(g_last_error, sizeof(g_last_error), "");
     g_running = 1;
@@ -362,6 +510,7 @@ void btcrig_core_stop(void) {
     pthread_mutex_lock(&g_lock);
     g_thread_started = 0;
     g_running = 0;
+    g_stats.connected = 0;
     copy_text(g_status, sizeof(g_status), "stopped");
     pthread_mutex_unlock(&g_lock);
 }
@@ -375,37 +524,58 @@ int btcrig_core_is_running(void) {
 
 int btcrig_core_worker_count(void) {
     pthread_mutex_lock(&g_lock);
-    int workers = g_config.cpu_threads + (g_config.opencl.enabled ? 1 : 0);
+    int workers = g_stats.worker_count > 0 ? g_stats.worker_count : g_config.cpu_threads;
     pthread_mutex_unlock(&g_lock);
     return workers;
 }
 
 uint64_t btcrig_core_total_hashes(void) {
-    return 0;
+    pthread_mutex_lock(&g_lock);
+    uint64_t hashes = g_stats.hashes;
+    pthread_mutex_unlock(&g_lock);
+    return hashes;
 }
 
 double btcrig_core_hashrate(void) {
-    return 0.0;
+    pthread_mutex_lock(&g_lock);
+    double hashrate = g_stats.hashrate;
+    pthread_mutex_unlock(&g_lock);
+    return hashrate;
 }
 
 int btcrig_core_stratum_connected(void) {
-    return btcrig_core_is_running();
+    pthread_mutex_lock(&g_lock);
+    int connected = g_stats.connected;
+    pthread_mutex_unlock(&g_lock);
+    return connected;
 }
 
 uint64_t btcrig_core_stratum_jobs(void) {
-    return 0;
+    pthread_mutex_lock(&g_lock);
+    uint64_t jobs = g_stats.jobs;
+    pthread_mutex_unlock(&g_lock);
+    return jobs;
 }
 
 uint64_t btcrig_core_stratum_submits(void) {
-    return 0;
+    pthread_mutex_lock(&g_lock);
+    uint64_t submits = g_stats.submits;
+    pthread_mutex_unlock(&g_lock);
+    return submits;
 }
 
 uint64_t btcrig_core_stratum_accepts(void) {
-    return 0;
+    pthread_mutex_lock(&g_lock);
+    uint64_t accepts = g_stats.accepts;
+    pthread_mutex_unlock(&g_lock);
+    return accepts;
 }
 
 uint64_t btcrig_core_stratum_rejects(void) {
-    return 0;
+    pthread_mutex_lock(&g_lock);
+    uint64_t rejects = g_stats.rejects;
+    pthread_mutex_unlock(&g_lock);
+    return rejects;
 }
 
 void btcrig_core_copy_pool(char *out, size_t out_size) {

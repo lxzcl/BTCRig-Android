@@ -1198,7 +1198,13 @@ int stratum_process_line(stratum_state_t *state, const char *line) {
     return 0;
 }
 
-static int flush_shares(stratum_state_t *state, stratum_conn_t *conn, const char *user, int *next_rpc_id) {
+static void publish_stats(const stratum_state_t *state, const stratum_client_config_t *config);
+
+static int flush_shares(stratum_state_t *state,
+                        stratum_conn_t *conn,
+                        const char *user,
+                        int *next_rpc_id,
+                        const stratum_client_config_t *config) {
     if (state->miner == NULL) {
         return 0;
     }
@@ -1211,6 +1217,7 @@ static int flush_shares(stratum_state_t *state, stratum_conn_t *conn, const char
         }
         register_pending_share(state, id, &share, monotonic_seconds());
         ++state->submit_count;
+        publish_stats(state, config);
     }
     return 0;
 }
@@ -1261,6 +1268,26 @@ static void maybe_print_stats(stratum_state_t *state,
 
     *last_time = now;
     *last_hashes = hashes;
+}
+
+static void publish_stats(const stratum_state_t *state, const stratum_client_config_t *config) {
+    if (state == NULL || config == NULL || config->on_stats == NULL) {
+        return;
+    }
+
+    stratum_snapshot_t snapshot;
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.now = monotonic_seconds();
+    snapshot.hashes = state->miner != NULL ? miner_hashes(state->miner) : 0;
+    snapshot.worker_count = state->miner != NULL ? miner_thread_count(state->miner) : 0;
+    snapshot.connected = 1;
+    snapshot.subscribed = state->subscribed;
+    snapshot.authorized = state->authorized;
+    snapshot.jobs = state->notify_count;
+    snapshot.submits = state->submit_count;
+    snapshot.accepts = state->accept_count;
+    snapshot.rejects = state->reject_count;
+    config->on_stats(config->stats_opaque, &snapshot);
 }
 
 int stratum_run_client(const char *url,
@@ -1318,6 +1345,7 @@ int stratum_run_client(const char *url,
     snprintf(state.user, sizeof(state.user), "%s", user);
     state.connected_at = monotonic_seconds();
     state.connect_count = 1;
+    publish_stats(&state, config);
     if (enable_mining) {
         const miner_opencl_config_t *opencl_config = config != NULL ? &config->opencl : NULL;
         const miner_cuda_config_t *cuda_config = config != NULL ? &config->cuda : NULL;
@@ -1344,6 +1372,7 @@ int stratum_run_client(const char *url,
             return 1;
         }
         (void)miner_snapshot_thread_hashes(miner, last_thread_hashes, stat_worker_count);
+        publish_stats(&state, config);
     }
 
     memset(&reader, 0, sizeof(reader));
@@ -1384,13 +1413,14 @@ int stratum_run_client(const char *url,
 
         handle_keyboard_input(&state, &keyboard, last_thread_hashes, stat_worker_count, &last_thread_time);
 
-        if (flush_shares(&state, &conn, user, &next_rpc_id) != 0) {
+        if (flush_shares(&state, &conn, user, &next_rpc_id, config) != 0) {
             fprintf(stderr, "[NET] submit failed, reconnecting\n");
             run_result = 1;
             break;
         }
         maybe_roll_extranonce(&state);
         maybe_print_stats(&state, &last_stats_time, &last_hashes, stats_interval);
+        publish_stats(&state, config);
 
         int rc = read_line(&reader, line, sizeof(line), 200);
         if (rc == -3) {
@@ -1408,6 +1438,7 @@ int stratum_run_client(const char *url,
         }
         if (line[0] != '\0') {
             (void)stratum_process_line(&state, line);
+            publish_stats(&state, config);
         }
 
         if (state.subscribed && !authorize_sent) {
@@ -1417,6 +1448,7 @@ int stratum_run_client(const char *url,
                 break;
             }
             authorize_sent = 1;
+            publish_stats(&state, config);
         }
 
         if (state.authorized && suggest_difficulty > 0.0 && !suggest_sent) {
@@ -1426,6 +1458,7 @@ int stratum_run_client(const char *url,
                 break;
             }
             suggest_sent = 1;
+            publish_stats(&state, config);
         }
 
         if (session_stop_at == 0.0 && session_seconds > 0.0 &&
@@ -1440,6 +1473,7 @@ int stratum_run_client(const char *url,
     }
 
 cleanup:
+    publish_stats(&state, config);
     keyboard_input_restore(&keyboard);
     free(last_thread_hashes);
     miner_destroy(miner);

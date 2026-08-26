@@ -55,6 +55,21 @@ typedef struct {
 } stratum_state_t;
 
 typedef struct {
+    double now;
+    uint64_t hashes;
+    int worker_count;
+    int connected;
+    int subscribed;
+    int authorized;
+    unsigned long jobs;
+    unsigned long submits;
+    unsigned long accepts;
+    unsigned long rejects;
+} stratum_snapshot_t;
+
+typedef void (*stratum_stats_callback_t)(void *opaque, const stratum_snapshot_t *snapshot);
+
+typedef struct {
     int thread_count;
     int cpu_affinity;
     int enable_mining;
@@ -64,6 +79,8 @@ typedef struct {
     double stop_at;
     double session_seconds;
     const char *session_label;
+    stratum_stats_callback_t on_stats;
+    void *stats_opaque;
 } stratum_client_config_t;
 
 void stratum_state_init(stratum_state_t *state);

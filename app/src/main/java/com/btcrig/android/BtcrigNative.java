@@ -12,11 +12,17 @@ final class BtcrigNative {
 
     static native boolean selfTest();
 
-    static native boolean start();
+    static native boolean start(String configPath);
 
     static native void stop();
 
     static native boolean isRunning();
+
+    static native int workerCount();
+
+    static native long totalHashes();
+
+    static native double hashrate();
 
     static native double benchmarkCpu(int seconds, int threads);
 }

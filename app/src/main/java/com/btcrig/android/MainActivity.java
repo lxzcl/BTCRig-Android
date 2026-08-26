@@ -11,6 +11,7 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import java.io.File;
 import java.util.Locale;
 
 public final class MainActivity extends Activity {
@@ -50,7 +51,6 @@ public final class MainActivity extends Activity {
     }
 
     private void startBtcrigService() {
-        BtcrigNative.start();
         Intent intent = new Intent(this, BtcrigService.class);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent);
@@ -58,14 +58,15 @@ public final class MainActivity extends Activity {
             startService(intent);
         }
         status.setText(baseStatus() + "\nService: running");
+        status.postDelayed(() -> status.setText(baseStatus() + "\nService: running"), 2000);
     }
 
     private void stopBtcrigService() {
-        BtcrigNative.stop();
         Intent intent = new Intent(this, BtcrigService.class);
         intent.setAction(BtcrigService.ACTION_STOP);
         startService(intent);
         status.setText(baseStatus() + "\nService: stopped");
+        status.postDelayed(() -> status.setText(baseStatus() + "\nService: stopped"), 2000);
     }
 
     private void requestNotificationPermission() {
@@ -92,10 +93,23 @@ public final class MainActivity extends Activity {
     }
 
     private String baseStatus() {
-        return "BTCRig Android shell"
+        boolean running = BtcrigNative.isRunning();
+        String text = "BTCRig Android shell"
                 + "\nBackend: " + BtcrigNative.backendName()
                 + "\nSelf-test: " + (BtcrigNative.selfTest() ? "ok" : "failed")
-                + "\nCore: " + (BtcrigNative.isRunning() ? "running" : "stopped");
+                + "\nCore: " + (running ? "running" : "stopped");
+        if (running) {
+            text += "\nMiner: " + formatHashrate(BtcrigNative.hashrate())
+                    + "\nWorkers: " + BtcrigNative.workerCount()
+                    + "\nTotal: " + BtcrigNative.totalHashes();
+        }
+        try {
+            File config = BtcrigConfig.ensure(this);
+            text += "\nConfig: " + config.getAbsolutePath();
+        } catch (Exception ignored) {
+            text += "\nConfig: unavailable";
+        }
+        return text;
     }
 
     private static String formatHashrate(double hps) {

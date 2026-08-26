@@ -6,7 +6,8 @@ Android wrapper/runtime for BTCRig.
 
 - Modern APK first: Android 5.0+ (`minSdk 21`), `compileSdk 36`.
 - Keep the first shell small: native Android UI, foreground service, no extra UI framework.
-- Native core boundary: JNI calls `btcrig_core` for start/stop/status/self-test and CPU SHA256d benchmark.
+- Native core boundary: JNI calls `btcrig_core` for start/stop/status/self-test, CPU SHA256d miner loop, and benchmark.
+- Default config is copied to the app private files directory as `config.json`; `"cpu_threads": 0` means auto.
 - Legacy Android 4.x support will be a separate target because it needs an old NDK/toolchain path.
 
 ## Build

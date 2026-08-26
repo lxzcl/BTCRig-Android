@@ -9,6 +9,9 @@ import android.content.Intent;
 import android.os.Build;
 import android.os.IBinder;
 
+import java.io.File;
+import java.io.IOException;
+
 public final class BtcrigService extends Service {
     static final String ACTION_STOP = "com.btcrig.android.STOP";
     private static final String CHANNEL_ID = "btcrig";
@@ -22,8 +25,19 @@ public final class BtcrigService extends Service {
             return START_NOT_STICKY;
         }
 
-        BtcrigNative.start();
         createNotificationChannel();
+        File config;
+        try {
+            config = BtcrigConfig.ensure(this);
+        } catch (IOException e) {
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+        if (!BtcrigNative.start(config.getAbsolutePath())) {
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+
         startForeground(NOTIFICATION_ID, buildNotification());
         return START_STICKY;
     }
@@ -39,6 +53,7 @@ public final class BtcrigService extends Service {
         super.onDestroy();
     }
 
+    @SuppressWarnings("deprecation")
     private Notification buildNotification() {
         Intent openIntent = new Intent(this, MainActivity.class);
         PendingIntent open = PendingIntent.getActivity(
@@ -47,7 +62,11 @@ public final class BtcrigService extends Service {
                 openIntent,
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
 
-        return new Notification.Builder(this, CHANNEL_ID)
+        Notification.Builder builder = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                ? new Notification.Builder(this, CHANNEL_ID)
+                : new Notification.Builder(this);
+
+        return builder
                 .setContentTitle("BTCRig is ready")
                 .setContentText(BtcrigNative.isRunning() ? "Miner core is running." : "Miner core is stopped.")
                 .setSmallIcon(android.R.drawable.stat_sys_upload)

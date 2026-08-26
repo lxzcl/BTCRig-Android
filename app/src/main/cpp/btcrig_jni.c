@@ -16,10 +16,14 @@ Java_com_btcrig_android_BtcrigNative_selfTest(JNIEnv *env, jclass ignored) {
 }
 
 JNIEXPORT jboolean JNICALL
-Java_com_btcrig_android_BtcrigNative_start(JNIEnv *env, jclass ignored) {
-    (void)env;
+Java_com_btcrig_android_BtcrigNative_start(JNIEnv *env, jclass ignored, jstring config_path) {
     (void)ignored;
-    return btcrig_core_start() ? JNI_TRUE : JNI_FALSE;
+    const char *path = config_path == NULL ? NULL : (*env)->GetStringUTFChars(env, config_path, NULL);
+    int started = btcrig_core_start(path);
+    if (path != NULL) {
+        (*env)->ReleaseStringUTFChars(env, config_path, path);
+    }
+    return started ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL
@@ -34,6 +38,27 @@ Java_com_btcrig_android_BtcrigNative_isRunning(JNIEnv *env, jclass ignored) {
     (void)env;
     (void)ignored;
     return btcrig_core_is_running() ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_btcrig_android_BtcrigNative_workerCount(JNIEnv *env, jclass ignored) {
+    (void)env;
+    (void)ignored;
+    return btcrig_core_worker_count();
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_btcrig_android_BtcrigNative_totalHashes(JNIEnv *env, jclass ignored) {
+    (void)env;
+    (void)ignored;
+    return (jlong)btcrig_core_total_hashes();
+}
+
+JNIEXPORT jdouble JNICALL
+Java_com_btcrig_android_BtcrigNative_hashrate(JNIEnv *env, jclass ignored) {
+    (void)env;
+    (void)ignored;
+    return btcrig_core_hashrate();
 }
 
 JNIEXPORT jdouble JNICALL

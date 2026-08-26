@@ -2,9 +2,11 @@
 
 #include <pthread.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 static const uint32_t k_sha256_initial_state[8] = {
     0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53aU,
@@ -37,8 +39,19 @@ typedef struct {
     uint8_t sink;
 } bench_worker_t;
 
+typedef struct {
+    pthread_t id;
+    uint32_t seed;
+} miner_worker_t;
+
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static int g_running = 0;
+static int g_stop_requested = 0;
+static miner_worker_t *g_workers = NULL;
+static int g_worker_count = 0;
+static uint64_t g_total_hashes = 0;
+static uint8_t g_sink = 0;
+static double g_started_at = 0.0;
 
 static uint32_t rotr32(uint32_t x, unsigned int n) {
     return (x >> n) | (x << (32U - n));
@@ -193,6 +206,109 @@ static void *bench_worker(void *opaque) {
     return NULL;
 }
 
+static int available_processors(void) {
+    long count = sysconf(_SC_NPROCESSORS_ONLN);
+    if (count < 1) {
+        return 1;
+    }
+    if (count > 256) {
+        return 256;
+    }
+    return (int)count;
+}
+
+static int clamp_threads(int threads) {
+    if (threads < 1) {
+        return available_processors();
+    }
+    if (threads > 256) {
+        return 256;
+    }
+    return threads;
+}
+
+static int read_cpu_threads(const char *config_path) {
+    if (config_path == NULL || config_path[0] == '\0') {
+        return 0;
+    }
+
+    FILE *file = fopen(config_path, "rb");
+    if (file == NULL) {
+        return 0;
+    }
+
+    char text[4097];
+    size_t n = fread(text, 1, sizeof(text) - 1, file);
+    fclose(file);
+    text[n] = '\0';
+
+    const char *key = strstr(text, "\"cpu_threads\"");
+    if (key == NULL) {
+        return 0;
+    }
+    const char *colon = strchr(key, ':');
+    if (colon == NULL) {
+        return 0;
+    }
+
+    char *end = NULL;
+    long value = strtol(colon + 1, &end, 10);
+    if (end == colon + 1 || value < 0) {
+        return 0;
+    }
+    if (value > 256) {
+        return 256;
+    }
+    return (int)value;
+}
+
+static int miner_should_stop(void) {
+    pthread_mutex_lock(&g_lock);
+    int stop = g_stop_requested;
+    pthread_mutex_unlock(&g_lock);
+    return stop;
+}
+
+static void miner_add_hashes(uint64_t hashes, uint8_t sink) {
+    pthread_mutex_lock(&g_lock);
+    g_total_hashes += hashes;
+    g_sink ^= sink;
+    pthread_mutex_unlock(&g_lock);
+}
+
+static void *miner_worker(void *opaque) {
+    miner_worker_t *worker = (miner_worker_t *)opaque;
+    uint8_t header[80];
+    uint8_t out[32];
+    uint32_t nonce = worker->seed;
+    uint64_t hashes = 0;
+    uint8_t sink = 0;
+
+    for (int i = 0; i < 80; ++i) {
+        header[i] = (uint8_t)(i + worker->seed);
+    }
+
+    while (!miner_should_stop()) {
+        for (int i = 0; i < 4096; ++i) {
+            put_le32(header + 76, nonce++);
+            sha256d_80(header, out);
+            sink ^= out[0];
+        }
+        hashes += 4096;
+
+        if (hashes >= 65536) {
+            miner_add_hashes(hashes, sink);
+            hashes = 0;
+            sink = 0;
+        }
+    }
+
+    if (hashes != 0) {
+        miner_add_hashes(hashes, sink);
+    }
+    return NULL;
+}
+
 const char *btcrig_core_backend_name(void) {
     return "fast-c";
 }
@@ -210,16 +326,79 @@ int btcrig_core_self_test(void) {
     return memcmp(out, expected, sizeof(expected)) == 0;
 }
 
-int btcrig_core_start(void) {
+int btcrig_core_start(const char *config_path) {
+    int threads = clamp_threads(read_cpu_threads(config_path));
+    miner_worker_t *workers = calloc((size_t)threads, sizeof(*workers));
+    if (workers == NULL) {
+        return 0;
+    }
+
     pthread_mutex_lock(&g_lock);
+    if (g_running) {
+        pthread_mutex_unlock(&g_lock);
+        free(workers);
+        return 1;
+    }
+    g_workers = workers;
+    g_worker_count = threads;
+    g_total_hashes = 0;
+    g_sink = 0;
+    g_started_at = monotonic_seconds();
+    g_stop_requested = 0;
     g_running = 1;
     pthread_mutex_unlock(&g_lock);
-    return 1;
+
+    int started = 0;
+    for (int i = 0; i < threads; ++i) {
+        workers[i].seed = (uint32_t)(0x9e3779b9U * (uint32_t)(i + 1));
+        if (pthread_create(&workers[i].id, NULL, miner_worker, &workers[i]) != 0) {
+            break;
+        }
+        ++started;
+    }
+
+    if (started == threads) {
+        return 1;
+    }
+
+    pthread_mutex_lock(&g_lock);
+    g_stop_requested = 1;
+    pthread_mutex_unlock(&g_lock);
+    for (int i = 0; i < started; ++i) {
+        pthread_join(workers[i].id, NULL);
+    }
+
+    pthread_mutex_lock(&g_lock);
+    g_workers = NULL;
+    g_worker_count = 0;
+    g_running = 0;
+    g_stop_requested = 0;
+    pthread_mutex_unlock(&g_lock);
+    free(workers);
+    return 0;
 }
 
 void btcrig_core_stop(void) {
     pthread_mutex_lock(&g_lock);
+    if (!g_running || g_stop_requested) {
+        pthread_mutex_unlock(&g_lock);
+        return;
+    }
+    g_stop_requested = 1;
+    miner_worker_t *workers = g_workers;
+    int worker_count = g_worker_count;
+    pthread_mutex_unlock(&g_lock);
+
+    for (int i = 0; i < worker_count; ++i) {
+        pthread_join(workers[i].id, NULL);
+    }
+
+    pthread_mutex_lock(&g_lock);
+    free(g_workers);
+    g_workers = NULL;
+    g_worker_count = 0;
     g_running = 0;
+    g_stop_requested = 0;
     pthread_mutex_unlock(&g_lock);
 }
 
@@ -228,6 +407,34 @@ int btcrig_core_is_running(void) {
     int running = g_running;
     pthread_mutex_unlock(&g_lock);
     return running;
+}
+
+int btcrig_core_worker_count(void) {
+    pthread_mutex_lock(&g_lock);
+    int workers = g_worker_count;
+    pthread_mutex_unlock(&g_lock);
+    return workers;
+}
+
+uint64_t btcrig_core_total_hashes(void) {
+    pthread_mutex_lock(&g_lock);
+    uint64_t hashes = g_total_hashes;
+    pthread_mutex_unlock(&g_lock);
+    return hashes;
+}
+
+double btcrig_core_hashrate(void) {
+    pthread_mutex_lock(&g_lock);
+    int running = g_running;
+    uint64_t hashes = g_total_hashes;
+    double started_at = g_started_at;
+    pthread_mutex_unlock(&g_lock);
+
+    double elapsed = monotonic_seconds() - started_at;
+    if (!running || elapsed <= 0.0) {
+        return 0.0;
+    }
+    return (double)hashes / elapsed;
 }
 
 double btcrig_core_benchmark_cpu(int seconds, int threads) {

@@ -1,10 +1,15 @@
 #include "btcrig_core.h"
 
+#include <errno.h>
+#include <fcntl.h>
+#include <netdb.h>
 #include <pthread.h>
+#include <poll.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -44,6 +49,13 @@ typedef struct {
     uint32_t seed;
 } miner_worker_t;
 
+typedef struct {
+    char pool[256];
+    char user[128];
+    char pass[128];
+    int cpu_threads;
+} core_config_t;
+
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static int g_running = 0;
 static int g_stop_requested = 0;
@@ -52,6 +64,15 @@ static int g_worker_count = 0;
 static uint64_t g_total_hashes = 0;
 static uint8_t g_sink = 0;
 static double g_started_at = 0.0;
+static pthread_t g_stratum_thread;
+static int g_stratum_started = 0;
+static int g_stratum_connected = 0;
+static uint64_t g_stratum_jobs = 0;
+static char g_pool[256] = "";
+static char g_user[128] = "";
+static char g_pass[128] = "";
+static char g_stratum_status[64] = "idle";
+static char g_last_error[128] = "";
 
 static uint32_t rotr32(uint32_t x, unsigned int n) {
     return (x >> n) | (x << (32U - n));
@@ -227,7 +248,17 @@ static int clamp_threads(int threads) {
     return threads;
 }
 
-static int read_cpu_threads(const char *config_path) {
+static void copy_text(char *out, size_t out_size, const char *text) {
+    if (out_size == 0) {
+        return;
+    }
+    if (text == NULL) {
+        text = "";
+    }
+    snprintf(out, out_size, "%s", text);
+}
+
+static int read_config_text(const char *config_path, char *text, size_t text_size) {
     if (config_path == NULL || config_path[0] == '\0') {
         return 0;
     }
@@ -237,29 +268,83 @@ static int read_cpu_threads(const char *config_path) {
         return 0;
     }
 
-    char text[4097];
-    size_t n = fread(text, 1, sizeof(text) - 1, file);
+    size_t n = fread(text, 1, text_size - 1, file);
     fclose(file);
     text[n] = '\0';
+    return 1;
+}
 
-    const char *key = strstr(text, "\"cpu_threads\"");
-    if (key == NULL) {
-        return 0;
+static const char *find_json_value(const char *text, const char *key) {
+    char pattern[64];
+    snprintf(pattern, sizeof(pattern), "\"%s\"", key);
+    const char *found = strstr(text, pattern);
+    if (found == NULL) {
+        return NULL;
     }
-    const char *colon = strchr(key, ':');
+    const char *colon = strchr(found, ':');
     if (colon == NULL) {
-        return 0;
+        return NULL;
     }
+    return colon + 1;
+}
 
-    char *end = NULL;
-    long value = strtol(colon + 1, &end, 10);
-    if (end == colon + 1 || value < 0) {
+static int parse_json_int(const char *text, const char *name) {
+    const char *value = find_json_value(text, name);
+    if (value == NULL) {
         return 0;
     }
-    if (value > 256) {
+    char *end = NULL;
+    long parsed = strtol(value, &end, 10);
+    if (end == value || parsed < 0) {
+        return 0;
+    }
+    if (parsed > 256) {
         return 256;
     }
-    return (int)value;
+    return (int)parsed;
+}
+
+static void parse_json_string(const char *text, const char *name, char *out, size_t out_size) {
+    if (out_size == 0) {
+        return;
+    }
+    out[0] = '\0';
+
+    const char *value = find_json_value(text, name);
+    if (value == NULL) {
+        return;
+    }
+    const char *p = strchr(value, '"');
+    if (p == NULL) {
+        return;
+    }
+    ++p;
+
+    size_t i = 0;
+    while (*p != '\0' && *p != '"' && i + 1 < out_size) {
+        if (*p == '\\' && p[1] != '\0') {
+            ++p;
+        }
+        out[i++] = *p++;
+    }
+    out[i] = '\0';
+}
+
+static core_config_t read_config(const char *config_path) {
+    core_config_t config;
+    memset(&config, 0, sizeof(config));
+
+    char text[4097];
+    if (!read_config_text(config_path, text, sizeof(text))) {
+        return config;
+    }
+
+    // ponytail: flat parser for app-owned config; replace when full BTCRig JSON config is imported.
+    config.cpu_threads = parse_json_int(text, "cpu_threads");
+    parse_json_string(text, "pool", config.pool, sizeof(config.pool));
+    parse_json_string(text, "user", config.user, sizeof(config.user));
+    parse_json_string(text, "pass", config.pass, sizeof(config.pass));
+    return config;
 }
 
 static int miner_should_stop(void) {
@@ -309,6 +394,270 @@ static void *miner_worker(void *opaque) {
     return NULL;
 }
 
+static void set_stratum_state(const char *status, const char *error, int connected) {
+    pthread_mutex_lock(&g_lock);
+    copy_text(g_stratum_status, sizeof(g_stratum_status), status);
+    if (error != NULL) {
+        copy_text(g_last_error, sizeof(g_last_error), error);
+    }
+    g_stratum_connected = connected;
+    pthread_mutex_unlock(&g_lock);
+}
+
+static void add_stratum_job(void) {
+    pthread_mutex_lock(&g_lock);
+    ++g_stratum_jobs;
+    copy_text(g_stratum_status, sizeof(g_stratum_status), "job received");
+    pthread_mutex_unlock(&g_lock);
+}
+
+static int parse_pool_url(const char *pool, char *host, size_t host_size, char *port, size_t port_size) {
+    const char *p = pool;
+    const char *prefix = "stratum+tcp://";
+    if (strncmp(p, prefix, strlen(prefix)) == 0) {
+        p += strlen(prefix);
+    } else {
+        prefix = "tcp://";
+        if (strncmp(p, prefix, strlen(prefix)) == 0) {
+            p += strlen(prefix);
+        }
+    }
+
+    const char *slash = strchr(p, '/');
+    const char *end = slash == NULL ? p + strlen(p) : slash;
+    const char *colon = NULL;
+    for (const char *it = p; it < end; ++it) {
+        if (*it == ':') {
+            colon = it;
+        }
+    }
+    if (colon == NULL || colon == p || colon + 1 >= end) {
+        return 0;
+    }
+
+    size_t host_len = (size_t)(colon - p);
+    size_t port_len = (size_t)(end - colon - 1);
+    if (host_len >= host_size || port_len >= port_size) {
+        return 0;
+    }
+    memcpy(host, p, host_len);
+    host[host_len] = '\0';
+    memcpy(port, colon + 1, port_len);
+    port[port_len] = '\0';
+    return 1;
+}
+
+static int wait_socket(int fd, short events, int timeout_ms) {
+    struct pollfd poll_fd;
+    memset(&poll_fd, 0, sizeof(poll_fd));
+    poll_fd.fd = fd;
+    poll_fd.events = events;
+
+    while (!miner_should_stop()) {
+        int rc = poll(&poll_fd, 1, timeout_ms);
+        if (rc > 0) {
+            if ((poll_fd.revents & events) != 0) {
+                return 1;
+            }
+            if ((poll_fd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
+                return -1;
+            }
+            return 0;
+        }
+        if (rc < 0 && errno != EINTR) {
+            return 0;
+        }
+    }
+    return 0;
+}
+
+static int connect_tcp(const char *host, const char *port) {
+    struct addrinfo hints;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+
+    struct addrinfo *result = NULL;
+    if (getaddrinfo(host, port, &hints, &result) != 0) {
+        return -1;
+    }
+
+    int fd = -1;
+    for (struct addrinfo *ai = result; ai != NULL && !miner_should_stop(); ai = ai->ai_next) {
+        fd = socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+        if (fd < 0) {
+            continue;
+        }
+
+        int flags = fcntl(fd, F_GETFL, 0);
+        if (flags >= 0) {
+            fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+        }
+
+        int rc = connect(fd, ai->ai_addr, ai->ai_addrlen);
+        if (rc == 0 || errno == EINPROGRESS) {
+            if (rc == 0 || wait_socket(fd, POLLOUT, 5000) > 0) {
+                int error = 0;
+                socklen_t len = sizeof(error);
+                if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &len) == 0 && error == 0) {
+                    break;
+                }
+            }
+        }
+
+        close(fd);
+        fd = -1;
+    }
+
+    freeaddrinfo(result);
+    return fd;
+}
+
+static int socket_send_all(int fd, const char *text) {
+    size_t sent = 0;
+    size_t len = strlen(text);
+    while (sent < len && !miner_should_stop()) {
+        if (wait_socket(fd, POLLOUT, 1000) <= 0) {
+            return 0;
+        }
+        ssize_t n = send(fd, text + sent, len - sent, 0);
+        if (n > 0) {
+            sent += (size_t)n;
+        } else if (n < 0 && errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK) {
+            return 0;
+        }
+    }
+    return sent == len;
+}
+
+static int socket_read_line(int fd, char *line, size_t line_size) {
+    size_t pos = 0;
+    while (pos + 1 < line_size && !miner_should_stop()) {
+        int ready = wait_socket(fd, POLLIN, 1000);
+        if (ready < 0) {
+            return 0;
+        }
+        if (ready == 0) {
+            continue;
+        }
+
+        char c;
+        ssize_t n = recv(fd, &c, 1, 0);
+        if (n == 0) {
+            return 0;
+        }
+        if (n < 0) {
+            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+                continue;
+            }
+            return 0;
+        }
+        if (c == '\n') {
+            break;
+        }
+        if (c != '\r') {
+            line[pos++] = c;
+        }
+    }
+    line[pos] = '\0';
+    return pos > 0;
+}
+
+static int sleep_with_stop(int seconds) {
+    for (int i = 0; i < seconds; ++i) {
+        if (miner_should_stop()) {
+            return 0;
+        }
+        sleep(1);
+    }
+    return 1;
+}
+
+static void handle_stratum_line(const char *line) {
+    if (strstr(line, "\"id\":1") != NULL || strstr(line, "\"id\": 1") != NULL) {
+        set_stratum_state("subscribed", NULL, 1);
+    } else if (strstr(line, "\"id\":2") != NULL || strstr(line, "\"id\": 2") != NULL) {
+        if (strstr(line, "\"result\":true") != NULL || strstr(line, "\"result\": true") != NULL) {
+            set_stratum_state("authorized", "", 1);
+        } else {
+            set_stratum_state("authorize failed", "authorize failed", 1);
+        }
+    } else if (strstr(line, "\"method\":\"mining.notify\"") != NULL
+            || strstr(line, "\"method\": \"mining.notify\"") != NULL) {
+        add_stratum_job();
+    }
+}
+
+static void *stratum_worker(void *opaque) {
+    (void)opaque;
+    char pool[256];
+    char user[128];
+    char pass[128];
+
+    pthread_mutex_lock(&g_lock);
+    copy_text(pool, sizeof(pool), g_pool);
+    copy_text(user, sizeof(user), g_user);
+    copy_text(pass, sizeof(pass), g_pass);
+    pthread_mutex_unlock(&g_lock);
+
+    if (pool[0] == '\0') {
+        set_stratum_state("no pool configured", "", 0);
+        return NULL;
+    }
+
+    char host[192];
+    char port[16];
+    if (!parse_pool_url(pool, host, sizeof(host), port, sizeof(port))) {
+        set_stratum_state("bad pool url", "bad pool url", 0);
+        return NULL;
+    }
+
+    while (!miner_should_stop()) {
+        set_stratum_state("connecting", "", 0);
+        int fd = connect_tcp(host, port);
+        if (fd < 0) {
+            set_stratum_state("connect failed", "connect failed", 0);
+            if (!sleep_with_stop(5)) {
+                break;
+            }
+            continue;
+        }
+
+        set_stratum_state("connected", "", 1);
+        char request[512];
+        snprintf(request, sizeof(request),
+                "{\"id\":1,\"method\":\"mining.subscribe\",\"params\":[\"BTCRig-Android/0.1.0\"]}\n");
+        if (!socket_send_all(fd, request)) {
+            close(fd);
+            set_stratum_state("send failed", "send failed", 0);
+            continue;
+        }
+
+        snprintf(request, sizeof(request),
+                "{\"id\":2,\"method\":\"mining.authorize\",\"params\":[\"%s\",\"%s\"]}\n",
+                user,
+                pass);
+        if (!socket_send_all(fd, request)) {
+            close(fd);
+            set_stratum_state("send failed", "send failed", 0);
+            continue;
+        }
+
+        char line[4096];
+        while (!miner_should_stop() && socket_read_line(fd, line, sizeof(line))) {
+            handle_stratum_line(line);
+        }
+        close(fd);
+        if (!miner_should_stop()) {
+            set_stratum_state("disconnected", "disconnected", 0);
+            sleep_with_stop(5);
+        }
+    }
+
+    set_stratum_state("stopped", "", 0);
+    return NULL;
+}
+
 const char *btcrig_core_backend_name(void) {
     return "fast-c";
 }
@@ -327,7 +676,8 @@ int btcrig_core_self_test(void) {
 }
 
 int btcrig_core_start(const char *config_path) {
-    int threads = clamp_threads(read_cpu_threads(config_path));
+    core_config_t config = read_config(config_path);
+    int threads = clamp_threads(config.cpu_threads);
     miner_worker_t *workers = calloc((size_t)threads, sizeof(*workers));
     if (workers == NULL) {
         return 0;
@@ -345,6 +695,13 @@ int btcrig_core_start(const char *config_path) {
     g_sink = 0;
     g_started_at = monotonic_seconds();
     g_stop_requested = 0;
+    g_stratum_connected = 0;
+    g_stratum_jobs = 0;
+    copy_text(g_pool, sizeof(g_pool), config.pool);
+    copy_text(g_user, sizeof(g_user), config.user);
+    copy_text(g_pass, sizeof(g_pass), config.pass);
+    copy_text(g_stratum_status, sizeof(g_stratum_status), "starting");
+    copy_text(g_last_error, sizeof(g_last_error), "");
     g_running = 1;
     pthread_mutex_unlock(&g_lock);
 
@@ -357,6 +714,14 @@ int btcrig_core_start(const char *config_path) {
         ++started;
     }
 
+    if (pthread_create(&g_stratum_thread, NULL, stratum_worker, NULL) == 0) {
+        pthread_mutex_lock(&g_lock);
+        g_stratum_started = 1;
+        pthread_mutex_unlock(&g_lock);
+    } else {
+        set_stratum_state("stratum unavailable", "stratum thread failed", 0);
+    }
+
     if (started == threads) {
         return 1;
     }
@@ -367,10 +732,17 @@ int btcrig_core_start(const char *config_path) {
     for (int i = 0; i < started; ++i) {
         pthread_join(workers[i].id, NULL);
     }
+    pthread_mutex_lock(&g_lock);
+    int stratum_started = g_stratum_started;
+    pthread_mutex_unlock(&g_lock);
+    if (stratum_started) {
+        pthread_join(g_stratum_thread, NULL);
+    }
 
     pthread_mutex_lock(&g_lock);
     g_workers = NULL;
     g_worker_count = 0;
+    g_stratum_started = 0;
     g_running = 0;
     g_stop_requested = 0;
     pthread_mutex_unlock(&g_lock);
@@ -387,18 +759,25 @@ void btcrig_core_stop(void) {
     g_stop_requested = 1;
     miner_worker_t *workers = g_workers;
     int worker_count = g_worker_count;
+    int stratum_started = g_stratum_started;
     pthread_mutex_unlock(&g_lock);
 
     for (int i = 0; i < worker_count; ++i) {
         pthread_join(workers[i].id, NULL);
+    }
+    if (stratum_started) {
+        pthread_join(g_stratum_thread, NULL);
     }
 
     pthread_mutex_lock(&g_lock);
     free(g_workers);
     g_workers = NULL;
     g_worker_count = 0;
+    g_stratum_started = 0;
+    g_stratum_connected = 0;
     g_running = 0;
     g_stop_requested = 0;
+    copy_text(g_stratum_status, sizeof(g_stratum_status), "stopped");
     pthread_mutex_unlock(&g_lock);
 }
 
@@ -435,6 +814,38 @@ double btcrig_core_hashrate(void) {
         return 0.0;
     }
     return (double)hashes / elapsed;
+}
+
+int btcrig_core_stratum_connected(void) {
+    pthread_mutex_lock(&g_lock);
+    int connected = g_stratum_connected;
+    pthread_mutex_unlock(&g_lock);
+    return connected;
+}
+
+uint64_t btcrig_core_stratum_jobs(void) {
+    pthread_mutex_lock(&g_lock);
+    uint64_t jobs = g_stratum_jobs;
+    pthread_mutex_unlock(&g_lock);
+    return jobs;
+}
+
+void btcrig_core_copy_pool(char *out, size_t out_size) {
+    pthread_mutex_lock(&g_lock);
+    copy_text(out, out_size, g_pool);
+    pthread_mutex_unlock(&g_lock);
+}
+
+void btcrig_core_copy_stratum_status(char *out, size_t out_size) {
+    pthread_mutex_lock(&g_lock);
+    copy_text(out, out_size, g_stratum_status);
+    pthread_mutex_unlock(&g_lock);
+}
+
+void btcrig_core_copy_last_error(char *out, size_t out_size) {
+    pthread_mutex_lock(&g_lock);
+    copy_text(out, out_size, g_last_error);
+    pthread_mutex_unlock(&g_lock);
 }
 
 double btcrig_core_benchmark_cpu(int seconds, int threads) {

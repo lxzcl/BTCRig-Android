@@ -2,6 +2,14 @@
 
 #include <jni.h>
 
+typedef void (*copy_string_fn)(char *, size_t);
+
+static jstring new_core_string(JNIEnv *env, copy_string_fn copy) {
+    char text[256];
+    copy(text, sizeof(text));
+    return (*env)->NewStringUTF(env, text);
+}
+
 JNIEXPORT jstring JNICALL
 Java_com_btcrig_android_BtcrigNative_backendName(JNIEnv *env, jclass ignored) {
     (void)ignored;
@@ -52,6 +60,38 @@ Java_com_btcrig_android_BtcrigNative_totalHashes(JNIEnv *env, jclass ignored) {
     (void)env;
     (void)ignored;
     return (jlong)btcrig_core_total_hashes();
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_btcrig_android_BtcrigNative_stratumConnected(JNIEnv *env, jclass ignored) {
+    (void)env;
+    (void)ignored;
+    return btcrig_core_stratum_connected() ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_btcrig_android_BtcrigNative_stratumJobs(JNIEnv *env, jclass ignored) {
+    (void)env;
+    (void)ignored;
+    return (jlong)btcrig_core_stratum_jobs();
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_btcrig_android_BtcrigNative_pool(JNIEnv *env, jclass ignored) {
+    (void)ignored;
+    return new_core_string(env, btcrig_core_copy_pool);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_btcrig_android_BtcrigNative_stratumStatus(JNIEnv *env, jclass ignored) {
+    (void)ignored;
+    return new_core_string(env, btcrig_core_copy_stratum_status);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_btcrig_android_BtcrigNative_lastError(JNIEnv *env, jclass ignored) {
+    (void)ignored;
+    return new_core_string(env, btcrig_core_copy_last_error);
 }
 
 JNIEXPORT jdouble JNICALL

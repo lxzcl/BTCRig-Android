@@ -68,7 +68,9 @@ public final class BtcrigService extends Service {
 
         return builder
                 .setContentTitle("BTCRig is ready")
-                .setContentText(BtcrigNative.isRunning() ? "Miner core is running." : "Miner core is stopped.")
+                .setContentText(BtcrigNative.isRunning()
+                        ? "Stratum: " + BtcrigNative.stratumStatus()
+                        : "Miner core is stopped.")
                 .setSmallIcon(android.R.drawable.stat_sys_upload)
                 .setContentIntent(open)
                 .setOngoing(true)

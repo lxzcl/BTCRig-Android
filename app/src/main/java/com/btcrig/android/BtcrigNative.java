@@ -22,6 +22,16 @@ final class BtcrigNative {
 
     static native long totalHashes();
 
+    static native boolean stratumConnected();
+
+    static native long stratumJobs();
+
+    static native String pool();
+
+    static native String stratumStatus();
+
+    static native String lastError();
+
     static native double hashrate();
 
     static native double benchmarkCpu(int seconds, int threads);

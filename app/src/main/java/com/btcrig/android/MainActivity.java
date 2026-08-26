@@ -17,6 +17,8 @@ import java.util.Locale;
 public final class MainActivity extends Activity {
     private TextView status;
     private Button benchmark;
+    private boolean refreshScheduled;
+    private String serviceState = "";
 
     @Override
     protected void onCreate(Bundle state) {
@@ -57,16 +59,18 @@ public final class MainActivity extends Activity {
         } else {
             startService(intent);
         }
-        status.setText(baseStatus() + "\nService: running");
-        status.postDelayed(() -> status.setText(baseStatus() + "\nService: running"), 2000);
+        serviceState = "running";
+        status.setText(baseStatus() + serviceLine());
+        scheduleRefresh();
     }
 
     private void stopBtcrigService() {
         Intent intent = new Intent(this, BtcrigService.class);
         intent.setAction(BtcrigService.ACTION_STOP);
         startService(intent);
-        status.setText(baseStatus() + "\nService: stopped");
-        status.postDelayed(() -> status.setText(baseStatus() + "\nService: stopped"), 2000);
+        serviceState = "stopped";
+        status.setText(baseStatus() + serviceLine());
+        scheduleRefresh();
     }
 
     private void requestNotificationPermission() {
@@ -87,9 +91,28 @@ public final class MainActivity extends Activity {
                 benchmark.setEnabled(true);
                 status.setText(baseStatus()
                         + "\nBenchmark: " + formatHashrate(hps)
-                        + "\nThreads: " + threads);
+                        + "\nThreads: " + threads
+                        + serviceLine());
             });
         }).start();
+    }
+
+    private void scheduleRefresh() {
+        if (refreshScheduled) {
+            return;
+        }
+        refreshScheduled = true;
+        status.postDelayed(() -> {
+            refreshScheduled = false;
+            status.setText(baseStatus() + serviceLine());
+            if (BtcrigNative.isRunning()) {
+                scheduleRefresh();
+            }
+        }, 2000);
+    }
+
+    private String serviceLine() {
+        return serviceState.isEmpty() ? "" : "\nService: " + serviceState;
     }
 
     private String baseStatus() {
@@ -99,9 +122,21 @@ public final class MainActivity extends Activity {
                 + "\nSelf-test: " + (BtcrigNative.selfTest() ? "ok" : "failed")
                 + "\nCore: " + (running ? "running" : "stopped");
         if (running) {
+            String pool = BtcrigNative.pool();
+            if (pool.isEmpty()) {
+                pool = "(not configured)";
+            }
             text += "\nMiner: " + formatHashrate(BtcrigNative.hashrate())
                     + "\nWorkers: " + BtcrigNative.workerCount()
-                    + "\nTotal: " + BtcrigNative.totalHashes();
+                    + "\nTotal: " + BtcrigNative.totalHashes()
+                    + "\nPool: " + pool
+                    + "\nStratum: " + BtcrigNative.stratumStatus()
+                    + "\nConnected: " + (BtcrigNative.stratumConnected() ? "yes" : "no")
+                    + "\nJobs: " + BtcrigNative.stratumJobs();
+            String error = BtcrigNative.lastError();
+            if (!error.isEmpty()) {
+                text += "\nLast error: " + error;
+            }
         }
         try {
             File config = BtcrigConfig.ensure(this);

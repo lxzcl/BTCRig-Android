@@ -1,5 +1,6 @@
 #include "btcrig_core.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <netdb.h>
@@ -12,6 +13,11 @@
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
+
+#define STRATUM_MAX_MERKLE_BRANCHES 64
+#define STRATUM_MAX_COINBASE_HEX 8192
+#define SHARE_QUEUE_SIZE 64
+#define MINER_BATCH_SIZE 4096
 
 static const uint32_t k_sha256_initial_state[8] = {
     0x6a09e667U, 0xbb67ae85U, 0x3c6ef372U, 0xa54ff53aU,
@@ -56,6 +62,38 @@ typedef struct {
     int cpu_threads;
 } core_config_t;
 
+typedef struct {
+    uint64_t seq;
+    char job_id[128];
+    char extranonce2[32];
+    char ntime[16];
+    uint8_t header[80];
+    uint8_t target[32];
+    int valid;
+} miner_job_t;
+
+typedef struct {
+    uint64_t seq;
+    uint32_t nonce;
+    char job_id[128];
+    char extranonce2[32];
+    char ntime[16];
+    uint8_t hash[32];
+} miner_share_t;
+
+typedef struct {
+    char job_id[128];
+    char prevhash[65];
+    char coinb1[STRATUM_MAX_COINBASE_HEX];
+    char coinb2[STRATUM_MAX_COINBASE_HEX];
+    char version[9];
+    char nbits[9];
+    char ntime[9];
+    char merkle[STRATUM_MAX_MERKLE_BRANCHES][65];
+    int merkle_count;
+    int valid;
+} stratum_template_t;
+
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static int g_running = 0;
 static int g_stop_requested = 0;
@@ -68,11 +106,26 @@ static pthread_t g_stratum_thread;
 static int g_stratum_started = 0;
 static int g_stratum_connected = 0;
 static uint64_t g_stratum_jobs = 0;
+static uint64_t g_stratum_submits = 0;
+static uint64_t g_stratum_accepts = 0;
+static uint64_t g_stratum_rejects = 0;
 static char g_pool[256] = "";
 static char g_user[128] = "";
 static char g_pass[128] = "";
 static char g_stratum_status[64] = "idle";
 static char g_last_error[128] = "";
+static char g_extranonce1[128] = "";
+static int g_extranonce2_size = 4;
+static uint64_t g_extranonce2_counter = 1;
+static double g_difficulty = 1.0;
+static uint64_t g_job_seq = 0;
+static uint32_t g_next_nonce = 0;
+static miner_job_t g_job;
+static stratum_template_t g_template;
+static miner_share_t g_shares[SHARE_QUEUE_SIZE];
+static int g_share_head = 0;
+static int g_share_tail = 0;
+static int g_share_count = 0;
 
 static uint32_t rotr32(uint32_t x, unsigned int n) {
     return (x >> n) | (x << (32U - n));
@@ -201,6 +254,171 @@ static void sha256d_80(const uint8_t header[80], uint8_t out[32]) {
     sha256_32(first, out);
 }
 
+static void sha256_data(const uint8_t *data, size_t len, uint8_t out[32]) {
+    uint32_t state[8];
+    memcpy(state, k_sha256_initial_state, sizeof(state));
+    const uint8_t *p = data;
+    size_t left = len;
+    while (left >= 64) {
+        sha256_compress_block(state, p);
+        p += 64;
+        left -= 64;
+    }
+    sha256_finish(state, p, left, len, out);
+}
+
+static void sha256d_data(const uint8_t *data, size_t len, uint8_t out[32]) {
+    uint8_t first[32];
+    sha256_data(data, len, first);
+    sha256_32(first, out);
+}
+
+static int hex_value(char c) {
+    if (c >= '0' && c <= '9') {
+        return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+        return c - 'a' + 10;
+    }
+    if (c >= 'A' && c <= 'F') {
+        return c - 'A' + 10;
+    }
+    return -1;
+}
+
+static int hex_to_bytes(const char *hex, uint8_t *out, size_t out_len) {
+    size_t hex_len = strlen(hex);
+    if ((hex_len & 1U) != 0 || hex_len / 2 != out_len) {
+        return -1;
+    }
+    for (size_t i = 0; i < out_len; ++i) {
+        int hi = hex_value(hex[i * 2]);
+        int lo = hex_value(hex[i * 2 + 1]);
+        if (hi < 0 || lo < 0) {
+            return -1;
+        }
+        out[i] = (uint8_t)((hi << 4) | lo);
+    }
+    return 0;
+}
+
+static int hex_to_alloc(const char *hex, uint8_t **out, size_t *out_len) {
+    size_t len = strlen(hex);
+    if ((len & 1U) != 0) {
+        return -1;
+    }
+    len /= 2;
+    uint8_t *buf = malloc(len == 0 ? 1 : len);
+    if (buf == NULL) {
+        return -1;
+    }
+    if (hex_to_bytes(hex, buf, len) != 0) {
+        free(buf);
+        return -1;
+    }
+    *out = buf;
+    *out_len = len;
+    return 0;
+}
+
+static int copy_checked(char *dst, size_t dst_size, const char *src) {
+    size_t len = strlen(src);
+    if (len >= dst_size) {
+        return -1;
+    }
+    memcpy(dst, src, len + 1);
+    return 0;
+}
+
+static int hex_u32_to_le(const char *hex, uint8_t out[4]) {
+    uint8_t tmp[4];
+    if (hex_to_bytes(hex, tmp, sizeof(tmp)) != 0) {
+        return -1;
+    }
+    out[0] = tmp[3];
+    out[1] = tmp[2];
+    out[2] = tmp[1];
+    out[3] = tmp[0];
+    return 0;
+}
+
+static int prevhash_to_header_bytes(const char *hex, uint8_t out[32]) {
+    if (strlen(hex) != 64) {
+        return -1;
+    }
+    for (int i = 0; i < 32; i += 4) {
+        uint8_t tmp[4];
+        char chunk[9];
+        memcpy(chunk, hex + i * 2, 8);
+        chunk[8] = '\0';
+        if (hex_to_bytes(chunk, tmp, sizeof(tmp)) != 0) {
+            return -1;
+        }
+        out[i + 0] = tmp[3];
+        out[i + 1] = tmp[2];
+        out[i + 2] = tmp[1];
+        out[i + 3] = tmp[0];
+    }
+    return 0;
+}
+
+static void target_from_difficulty(double difficulty, uint8_t target[32]) {
+    uint8_t be_target[32];
+    memset(be_target, 0, sizeof(be_target));
+    memset(target, 0, 32);
+    if (difficulty <= 0.0) {
+        difficulty = 1.0;
+    }
+    double mant = 65535.0 / difficulty;
+    int exp = 29;
+    while (mant >= 0x800000 && exp < 32) {
+        mant /= 256.0;
+        ++exp;
+    }
+    while (mant > 0.0 && mant < 0x8000 && exp > 3) {
+        mant *= 256.0;
+        --exp;
+    }
+    uint32_t m = (uint32_t)mant;
+    int idx = 32 - exp;
+    if (idx >= 0 && idx + 2 < 32) {
+        be_target[idx] = (uint8_t)(m >> 16);
+        be_target[idx + 1] = (uint8_t)(m >> 8);
+        be_target[idx + 2] = (uint8_t)m;
+        for (int i = 0; i < 32; ++i) {
+            target[i] = be_target[31 - i];
+        }
+    } else if (idx < 0) {
+        memset(target, 0xff, 32);
+    }
+}
+
+static int hash_meets_target(const uint8_t hash[32], const uint8_t target[32]) {
+    for (int i = 31; i >= 0; --i) {
+        if (hash[i] < target[i]) {
+            return 1;
+        }
+        if (hash[i] > target[i]) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static void format_extranonce2(char *out, size_t out_size, int extranonce2_size, uint64_t value) {
+    int chars = extranonce2_size * 2;
+    if (chars <= 0 || (size_t)chars + 1 > out_size) {
+        if (out_size > 0) {
+            out[0] = '\0';
+        }
+        return;
+    }
+    snprintf(out, out_size, "%0*llx", chars, (unsigned long long)value);
+    if ((int)strlen(out) != chars) {
+        out[0] = '\0';
+    }
+}
+
 static void *bench_worker(void *opaque) {
     bench_worker_t *worker = (bench_worker_t *)opaque;
     uint8_t header[80];
@@ -256,6 +474,152 @@ static void copy_text(char *out, size_t out_size, const char *text) {
         text = "";
     }
     snprintf(out, out_size, "%s", text);
+}
+
+static int build_job(miner_job_t *out,
+                     const stratum_template_t *tpl,
+                     const char *extranonce1,
+                     const char *extranonce2,
+                     double difficulty,
+                     uint64_t seq) {
+    char *coinbase_hex = NULL;
+    uint8_t *coinbase = NULL;
+    size_t coinbase_len = 0;
+    uint8_t merkle_root[32];
+    int rc = -1;
+
+    memset(out, 0, sizeof(*out));
+    if (copy_checked(out->job_id, sizeof(out->job_id), tpl->job_id) != 0 ||
+            copy_checked(out->extranonce2, sizeof(out->extranonce2), extranonce2) != 0 ||
+            copy_checked(out->ntime, sizeof(out->ntime), tpl->ntime) != 0) {
+        return -1;
+    }
+
+    size_t coinbase_hex_len = strlen(tpl->coinb1) + strlen(extranonce1) + strlen(extranonce2) + strlen(tpl->coinb2);
+    coinbase_hex = malloc(coinbase_hex_len + 1);
+    if (coinbase_hex == NULL) {
+        return -1;
+    }
+    snprintf(coinbase_hex, coinbase_hex_len + 1, "%s%s%s%s", tpl->coinb1, extranonce1, extranonce2, tpl->coinb2);
+    if (hex_to_alloc(coinbase_hex, &coinbase, &coinbase_len) != 0) {
+        goto done;
+    }
+    sha256d_data(coinbase, coinbase_len, merkle_root);
+
+    for (int i = 0; i < tpl->merkle_count; ++i) {
+        uint8_t branch[32];
+        uint8_t combined[64];
+        if (hex_to_bytes(tpl->merkle[i], branch, sizeof(branch)) != 0) {
+            goto done;
+        }
+        memcpy(combined, merkle_root, 32);
+        memcpy(combined + 32, branch, 32);
+        sha256d_data(combined, sizeof(combined), merkle_root);
+    }
+
+    uint8_t *p = out->header;
+    if (hex_u32_to_le(tpl->version, p) != 0) {
+        goto done;
+    }
+    p += 4;
+    if (prevhash_to_header_bytes(tpl->prevhash, p) != 0) {
+        goto done;
+    }
+    p += 32;
+    memcpy(p, merkle_root, 32);
+    p += 32;
+    if (hex_u32_to_le(tpl->ntime, p) != 0) {
+        goto done;
+    }
+    p += 4;
+    if (hex_u32_to_le(tpl->nbits, p) != 0) {
+        goto done;
+    }
+    p += 4;
+    memset(p, 0, 4);
+
+    target_from_difficulty(difficulty, out->target);
+    out->seq = seq;
+    out->valid = 1;
+    rc = 0;
+
+done:
+    free(coinbase);
+    free(coinbase_hex);
+    return rc;
+}
+
+static int rebuild_job_locked(const char *status) {
+    if (!g_template.valid || g_extranonce1[0] == '\0' || g_extranonce2_size <= 0) {
+        return 0;
+    }
+
+    char extranonce2[32];
+    format_extranonce2(extranonce2, sizeof(extranonce2), g_extranonce2_size, g_extranonce2_counter++);
+    if (extranonce2[0] == '\0') {
+        g_job.valid = 0;
+        copy_text(g_last_error, sizeof(g_last_error), "bad extranonce2");
+        return 0;
+    }
+
+    miner_job_t job;
+    if (build_job(&job, &g_template, g_extranonce1, extranonce2, g_difficulty, ++g_job_seq) != 0) {
+        g_job.valid = 0;
+        copy_text(g_last_error, sizeof(g_last_error), "bad mining job");
+        return 0;
+    }
+
+    g_job = job;
+    g_next_nonce = 0;
+    g_share_head = 0;
+    g_share_tail = 0;
+    g_share_count = 0;
+    if (status != NULL) {
+        copy_text(g_stratum_status, sizeof(g_stratum_status), status);
+    }
+    return 1;
+}
+
+static int copy_active_job(miner_job_t *out, uint32_t *nonce) {
+    pthread_mutex_lock(&g_lock);
+    int valid = g_job.valid;
+    if (valid) {
+        *out = g_job;
+        *nonce = g_next_nonce;
+        g_next_nonce += MINER_BATCH_SIZE;
+    }
+    pthread_mutex_unlock(&g_lock);
+    return valid;
+}
+
+static void queue_share(const miner_job_t *job, uint32_t nonce, const uint8_t hash[32]) {
+    pthread_mutex_lock(&g_lock);
+    // ponytail: one global share queue is enough for this Android shell; split per backend if contention shows up.
+    if (g_share_count < SHARE_QUEUE_SIZE) {
+        miner_share_t *share = &g_shares[g_share_tail];
+        memset(share, 0, sizeof(*share));
+        share->seq = job->seq;
+        share->nonce = nonce;
+        memcpy(share->hash, hash, 32);
+        copy_checked(share->job_id, sizeof(share->job_id), job->job_id);
+        copy_checked(share->extranonce2, sizeof(share->extranonce2), job->extranonce2);
+        copy_checked(share->ntime, sizeof(share->ntime), job->ntime);
+        g_share_tail = (g_share_tail + 1) % SHARE_QUEUE_SIZE;
+        ++g_share_count;
+    }
+    pthread_mutex_unlock(&g_lock);
+}
+
+static int pop_share(miner_share_t *out) {
+    pthread_mutex_lock(&g_lock);
+    int ok = g_share_count > 0;
+    if (ok) {
+        *out = g_shares[g_share_head];
+        g_share_head = (g_share_head + 1) % SHARE_QUEUE_SIZE;
+        --g_share_count;
+    }
+    pthread_mutex_unlock(&g_lock);
+    return ok;
 }
 
 static int read_config_text(const char *config_path, char *text, size_t text_size) {
@@ -369,17 +733,30 @@ static void *miner_worker(void *opaque) {
     uint64_t hashes = 0;
     uint8_t sink = 0;
 
-    for (int i = 0; i < 80; ++i) {
-        header[i] = (uint8_t)(i + worker->seed);
-    }
-
     while (!miner_should_stop()) {
-        for (int i = 0; i < 4096; ++i) {
-            put_le32(header + 76, nonce++);
-            sha256d_80(header, out);
-            sink ^= out[0];
+        miner_job_t job;
+        if (copy_active_job(&job, &nonce)) {
+            memcpy(header, job.header, sizeof(header));
+            for (int i = 0; i < MINER_BATCH_SIZE; ++i) {
+                uint32_t share_nonce = nonce++;
+                put_le32(header + 76, share_nonce);
+                sha256d_80(header, out);
+                sink ^= out[0];
+                if (hash_meets_target(out, job.target)) {
+                    queue_share(&job, share_nonce, out);
+                }
+            }
+        } else {
+            for (int i = 0; i < 80; ++i) {
+                header[i] = (uint8_t)(i + nonce);
+            }
+            for (int i = 0; i < MINER_BATCH_SIZE; ++i) {
+                put_le32(header + 76, nonce++);
+                sha256d_80(header, out);
+                sink ^= out[0];
+            }
         }
-        hashes += 4096;
+        hashes += MINER_BATCH_SIZE;
 
         if (hashes >= 65536) {
             miner_add_hashes(hashes, sink);
@@ -401,13 +778,12 @@ static void set_stratum_state(const char *status, const char *error, int connect
         copy_text(g_last_error, sizeof(g_last_error), error);
     }
     g_stratum_connected = connected;
-    pthread_mutex_unlock(&g_lock);
-}
-
-static void add_stratum_job(void) {
-    pthread_mutex_lock(&g_lock);
-    ++g_stratum_jobs;
-    copy_text(g_stratum_status, sizeof(g_stratum_status), "job received");
+    if (!connected) {
+        g_job.valid = 0;
+        g_share_head = 0;
+        g_share_tail = 0;
+        g_share_count = 0;
+    }
     pthread_mutex_unlock(&g_lock);
 }
 
@@ -530,37 +906,78 @@ static int socket_send_all(int fd, const char *text) {
     return sent == len;
 }
 
-static int socket_read_line(int fd, char *line, size_t line_size) {
-    size_t pos = 0;
-    while (pos + 1 < line_size && !miner_should_stop()) {
-        int ready = wait_socket(fd, POLLIN, 1000);
-        if (ready < 0) {
-            return 0;
-        }
-        if (ready == 0) {
-            continue;
-        }
-
-        char c;
-        ssize_t n = recv(fd, &c, 1, 0);
-        if (n == 0) {
-            return 0;
-        }
-        if (n < 0) {
-            if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
-                continue;
-            }
-            return 0;
-        }
-        if (c == '\n') {
-            break;
-        }
-        if (c != '\r') {
-            line[pos++] = c;
-        }
+static int socket_read_available(int fd, char *buffer, size_t *used, size_t buffer_size) {
+    if (*used + 1 >= buffer_size) {
+        return -1;
     }
-    line[pos] = '\0';
-    return pos > 0;
+
+    struct pollfd poll_fd;
+    memset(&poll_fd, 0, sizeof(poll_fd));
+    poll_fd.fd = fd;
+    poll_fd.events = POLLIN;
+
+    int ready = poll(&poll_fd, 1, 250);
+    if (ready == 0) {
+        return 0;
+    }
+    if (ready < 0) {
+        return errno == EINTR ? 0 : -1;
+    }
+    if ((poll_fd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
+        return -1;
+    }
+    if ((poll_fd.revents & POLLIN) == 0) {
+        return 0;
+    }
+
+    ssize_t n = recv(fd, buffer + *used, buffer_size - *used - 1, 0);
+    if (n == 0) {
+        return -1;
+    }
+    if (n < 0) {
+        if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK) {
+            return 0;
+        }
+        return -1;
+    }
+    *used += (size_t)n;
+    buffer[*used] = '\0';
+    return 1;
+}
+
+static int send_submit_share(int fd, int id, const char *user, const miner_share_t *share) {
+    char nonce_hex[9];
+    char request[768];
+    snprintf(nonce_hex, sizeof(nonce_hex), "%08x", share->nonce);
+    int n = snprintf(request, sizeof(request),
+            "{\"id\":%d,\"method\":\"mining.submit\",\"params\":[\"%s\",\"%s\",\"%s\",\"%s\",\"%s\"]}\n",
+            id,
+            user,
+            share->job_id,
+            share->extranonce2,
+            share->ntime,
+            nonce_hex);
+    if (n < 0 || (size_t)n >= sizeof(request)) {
+        return 0;
+    }
+    return socket_send_all(fd, request);
+}
+
+static int flush_shares(int fd, const char *user, int *next_rpc_id) {
+    miner_share_t share;
+    while (pop_share(&share)) {
+        int id = (*next_rpc_id)++;
+        if (!send_submit_share(fd, id, user, &share)) {
+            return 0;
+        }
+        pthread_mutex_lock(&g_lock);
+        ++g_stratum_submits;
+        if (g_stratum_accepts == 0 && g_stratum_rejects == 0) {
+            copy_text(g_stratum_status, sizeof(g_stratum_status), "share submitted");
+        }
+        pthread_mutex_unlock(&g_lock);
+    }
+    return 1;
 }
 
 static int sleep_with_stop(int seconds) {
@@ -573,18 +990,374 @@ static int sleep_with_stop(int seconds) {
     return 1;
 }
 
-static void handle_stratum_line(const char *line) {
-    if (strstr(line, "\"id\":1") != NULL || strstr(line, "\"id\": 1") != NULL) {
-        set_stratum_state("subscribed", NULL, 1);
-    } else if (strstr(line, "\"id\":2") != NULL || strstr(line, "\"id\": 2") != NULL) {
-        if (strstr(line, "\"result\":true") != NULL || strstr(line, "\"result\": true") != NULL) {
-            set_stratum_state("authorized", "", 1);
-        } else {
-            set_stratum_state("authorize failed", "authorize failed", 1);
+static const char *skip_json_ws(const char *p) {
+    while (*p != '\0' && isspace((unsigned char)*p)) {
+        ++p;
+    }
+    return p;
+}
+
+static const char *skip_json_string(const char *p) {
+    if (*p != '"') {
+        return NULL;
+    }
+    ++p;
+    while (*p != '\0') {
+        if (*p == '\\' && p[1] != '\0') {
+            p += 2;
+            continue;
         }
-    } else if (strstr(line, "\"method\":\"mining.notify\"") != NULL
-            || strstr(line, "\"method\": \"mining.notify\"") != NULL) {
-        add_stratum_job();
+        if (*p == '"') {
+            return p + 1;
+        }
+        ++p;
+    }
+    return NULL;
+}
+
+static const char *skip_json_value(const char *p) {
+    p = skip_json_ws(p);
+    if (*p == '"') {
+        return skip_json_string(p);
+    }
+    if (*p == '[') {
+        ++p;
+        p = skip_json_ws(p);
+        if (*p == ']') {
+            return p + 1;
+        }
+        while (*p != '\0') {
+            p = skip_json_value(p);
+            if (p == NULL) {
+                return NULL;
+            }
+            p = skip_json_ws(p);
+            if (*p == ',') {
+                ++p;
+                continue;
+            }
+            return *p == ']' ? p + 1 : NULL;
+        }
+        return NULL;
+    }
+    if (*p == '{') {
+        ++p;
+        p = skip_json_ws(p);
+        if (*p == '}') {
+            return p + 1;
+        }
+        while (*p != '\0') {
+            p = skip_json_string(skip_json_ws(p));
+            if (p == NULL) {
+                return NULL;
+            }
+            p = skip_json_ws(p);
+            if (*p++ != ':') {
+                return NULL;
+            }
+            p = skip_json_value(p);
+            if (p == NULL) {
+                return NULL;
+            }
+            p = skip_json_ws(p);
+            if (*p == ',') {
+                ++p;
+                continue;
+            }
+            return *p == '}' ? p + 1 : NULL;
+        }
+        return NULL;
+    }
+    while (*p != '\0' && *p != ',' && *p != ']' && *p != '}') {
+        ++p;
+    }
+    return p;
+}
+
+static int read_json_string_token(const char *p, char *out, size_t out_size) {
+    p = skip_json_ws(p);
+    if (out_size == 0 || *p != '"') {
+        return 0;
+    }
+    ++p;
+    size_t i = 0;
+    while (*p != '\0' && *p != '"') {
+        if (*p == '\\' && p[1] != '\0') {
+            ++p;
+        }
+        if (i + 1 >= out_size) {
+            out[0] = '\0';
+            return 0;
+        }
+        out[i++] = *p++;
+    }
+    if (*p != '"') {
+        out[0] = '\0';
+        return 0;
+    }
+    out[i] = '\0';
+    return 1;
+}
+
+static const char *json_array_value(const char *line, const char *key) {
+    const char *value = find_json_value(line, key);
+    if (value == NULL) {
+        return NULL;
+    }
+    value = skip_json_ws(value);
+    return *value == '[' ? value : NULL;
+}
+
+static const char *json_array_item(const char *array, int index) {
+    const char *p = skip_json_ws(array);
+    if (*p++ != '[') {
+        return NULL;
+    }
+    for (int i = 0; *p != '\0'; ++i) {
+        p = skip_json_ws(p);
+        if (*p == ']') {
+            return NULL;
+        }
+        if (i == index) {
+            return p;
+        }
+        p = skip_json_value(p);
+        if (p == NULL) {
+            return NULL;
+        }
+        p = skip_json_ws(p);
+        if (*p == ',') {
+            ++p;
+            continue;
+        }
+        return NULL;
+    }
+    return NULL;
+}
+
+static int json_array_string_at(const char *line, const char *key, int index, char *out, size_t out_size) {
+    const char *array = json_array_value(line, key);
+    const char *item = array == NULL ? NULL : json_array_item(array, index);
+    return item != NULL && read_json_string_token(item, out, out_size);
+}
+
+static int json_array_int_at(const char *line, const char *key, int index, int *out) {
+    const char *array = json_array_value(line, key);
+    const char *item = array == NULL ? NULL : json_array_item(array, index);
+    if (item == NULL) {
+        return 0;
+    }
+    const char *start = skip_json_ws(item);
+    char *end = NULL;
+    long value = strtol(start, &end, 10);
+    if (end == start) {
+        return 0;
+    }
+    *out = (int)value;
+    return 1;
+}
+
+static int json_array_double_at(const char *line, const char *key, int index, double *out) {
+    const char *array = json_array_value(line, key);
+    const char *item = array == NULL ? NULL : json_array_item(array, index);
+    if (item == NULL) {
+        return 0;
+    }
+    const char *start = skip_json_ws(item);
+    char *end = NULL;
+    double value = strtod(start, &end);
+    if (end == start) {
+        return 0;
+    }
+    *out = value;
+    return 1;
+}
+
+static int json_string_array_at(const char *line,
+                                const char *key,
+                                int index,
+                                char out[][65],
+                                int max_count,
+                                int *count) {
+    const char *array = json_array_value(line, key);
+    const char *item = array == NULL ? NULL : json_array_item(array, index);
+    const char *p = item == NULL ? NULL : skip_json_ws(item);
+    if (p == NULL || *p++ != '[') {
+        return 0;
+    }
+    *count = 0;
+    while (*p != '\0') {
+        p = skip_json_ws(p);
+        if (*p == ']') {
+            return 1;
+        }
+        if (*count < max_count && !read_json_string_token(p, out[*count], 65)) {
+            return 0;
+        }
+        if (*count < max_count) {
+            ++*count;
+        }
+        p = skip_json_value(p);
+        if (p == NULL) {
+            return 0;
+        }
+        p = skip_json_ws(p);
+        if (*p == ',') {
+            ++p;
+            continue;
+        }
+        return *p == ']';
+    }
+    return 0;
+}
+
+static int json_id(const char *line) {
+    const char *value = find_json_value(line, "id");
+    if (value == NULL) {
+        return -1;
+    }
+    value = skip_json_ws(value);
+    if (strncmp(value, "null", 4) == 0) {
+        return -1;
+    }
+    char *end = NULL;
+    long id = strtol(value, &end, 10);
+    return end == value ? -1 : (int)id;
+}
+
+static int json_method_is(const char *line, const char *method) {
+    char value[64];
+    const char *p = find_json_value(line, "method");
+    return p != NULL && read_json_string_token(p, value, sizeof(value)) && strcmp(value, method) == 0;
+}
+
+static int json_result_is(const char *line, const char *value) {
+    const char *p = find_json_value(line, "result");
+    if (p == NULL) {
+        return 0;
+    }
+    p = skip_json_ws(p);
+    return strncmp(p, value, strlen(value)) == 0;
+}
+
+static int json_error_present(const char *line) {
+    const char *p = find_json_value(line, "error");
+    if (p == NULL) {
+        return 0;
+    }
+    p = skip_json_ws(p);
+    return strncmp(p, "null", 4) != 0;
+}
+
+static void handle_subscribe_line(const char *line) {
+    char extranonce1[128];
+    int extranonce2_size = 0;
+    if (!json_array_string_at(line, "result", 1, extranonce1, sizeof(extranonce1)) ||
+            !json_array_int_at(line, "result", 2, &extranonce2_size)) {
+        set_stratum_state("bad subscribe", "bad subscribe", 1);
+        return;
+    }
+    pthread_mutex_lock(&g_lock);
+    copy_text(g_extranonce1, sizeof(g_extranonce1), extranonce1);
+    g_extranonce2_size = extranonce2_size;
+    copy_text(g_stratum_status, sizeof(g_stratum_status), "subscribed");
+    copy_text(g_last_error, sizeof(g_last_error), "");
+    rebuild_job_locked("mining");
+    pthread_mutex_unlock(&g_lock);
+}
+
+static void handle_authorize_line(const char *line) {
+    if (json_result_is(line, "true")) {
+        set_stratum_state("authorized", "", 1);
+    } else {
+        set_stratum_state("authorize failed", "authorize failed", 1);
+    }
+}
+
+static void handle_set_difficulty_line(const char *line) {
+    double difficulty = 0.0;
+    if (!json_array_double_at(line, "params", 0, &difficulty)) {
+        set_stratum_state("bad difficulty", "bad difficulty", 1);
+        return;
+    }
+    pthread_mutex_lock(&g_lock);
+    g_difficulty = difficulty;
+    if (!rebuild_job_locked("difficulty updated")) {
+        copy_text(g_stratum_status, sizeof(g_stratum_status), "difficulty set");
+    }
+    pthread_mutex_unlock(&g_lock);
+}
+
+static void handle_set_extranonce_line(const char *line) {
+    char extranonce1[128];
+    int extranonce2_size = 0;
+    if (!json_array_string_at(line, "params", 0, extranonce1, sizeof(extranonce1)) ||
+            !json_array_int_at(line, "params", 1, &extranonce2_size)) {
+        set_stratum_state("bad extranonce", "bad extranonce", 1);
+        return;
+    }
+    pthread_mutex_lock(&g_lock);
+    copy_text(g_extranonce1, sizeof(g_extranonce1), extranonce1);
+    g_extranonce2_size = extranonce2_size;
+    rebuild_job_locked("extranonce updated");
+    pthread_mutex_unlock(&g_lock);
+}
+
+static void handle_notify_line(const char *line) {
+    stratum_template_t tpl;
+    memset(&tpl, 0, sizeof(tpl));
+
+    if (!json_array_string_at(line, "params", 0, tpl.job_id, sizeof(tpl.job_id)) ||
+            !json_array_string_at(line, "params", 1, tpl.prevhash, sizeof(tpl.prevhash)) ||
+            !json_array_string_at(line, "params", 2, tpl.coinb1, sizeof(tpl.coinb1)) ||
+            !json_array_string_at(line, "params", 3, tpl.coinb2, sizeof(tpl.coinb2)) ||
+            !json_string_array_at(line, "params", 4, tpl.merkle, STRATUM_MAX_MERKLE_BRANCHES, &tpl.merkle_count) ||
+            !json_array_string_at(line, "params", 5, tpl.version, sizeof(tpl.version)) ||
+            !json_array_string_at(line, "params", 6, tpl.nbits, sizeof(tpl.nbits)) ||
+            !json_array_string_at(line, "params", 7, tpl.ntime, sizeof(tpl.ntime))) {
+        set_stratum_state("bad notify", "bad notify", 1);
+        return;
+    }
+    tpl.valid = 1;
+
+    pthread_mutex_lock(&g_lock);
+    g_template = tpl;
+    ++g_stratum_jobs;
+    copy_text(g_stratum_status, sizeof(g_stratum_status), "job received");
+    copy_text(g_last_error, sizeof(g_last_error), "");
+    rebuild_job_locked("mining");
+    pthread_mutex_unlock(&g_lock);
+}
+
+static void handle_submit_response_line(const char *line) {
+    int accepted = !json_error_present(line) && json_result_is(line, "true");
+    pthread_mutex_lock(&g_lock);
+    if (accepted) {
+        ++g_stratum_accepts;
+        copy_text(g_stratum_status, sizeof(g_stratum_status), "share accepted");
+        copy_text(g_last_error, sizeof(g_last_error), "");
+    } else {
+        ++g_stratum_rejects;
+        copy_text(g_stratum_status, sizeof(g_stratum_status), "share rejected");
+        copy_text(g_last_error, sizeof(g_last_error), "share rejected");
+    }
+    pthread_mutex_unlock(&g_lock);
+}
+
+static void handle_stratum_line(const char *line) {
+    int id = json_id(line);
+    if (id == 1) {
+        handle_subscribe_line(line);
+    } else if (id == 2) {
+        handle_authorize_line(line);
+    } else if (id >= 4) {
+        handle_submit_response_line(line);
+    } else if (json_method_is(line, "mining.set_difficulty")) {
+        handle_set_difficulty_line(line);
+    } else if (json_method_is(line, "mining.notify")) {
+        handle_notify_line(line);
+    } else if (json_method_is(line, "mining.set_extranonce")) {
+        handle_set_extranonce_line(line);
     }
 }
 
@@ -643,9 +1416,43 @@ static void *stratum_worker(void *opaque) {
             continue;
         }
 
-        char line[4096];
-        while (!miner_should_stop() && socket_read_line(fd, line, sizeof(line))) {
-            handle_stratum_line(line);
+        int next_rpc_id = 4;
+        char input[8192];
+        size_t used = 0;
+        input[0] = '\0';
+        while (!miner_should_stop()) {
+            if (!flush_shares(fd, user, &next_rpc_id)) {
+                set_stratum_state("submit failed", "submit failed", 0);
+                break;
+            }
+
+            int read_rc = socket_read_available(fd, input, &used, sizeof(input));
+            if (read_rc < 0) {
+                break;
+            }
+            if (read_rc == 0) {
+                continue;
+            }
+
+            char *start = input;
+            for (;;) {
+                char *newline = memchr(start, '\n', used - (size_t)(start - input));
+                if (newline == NULL) {
+                    break;
+                }
+                *newline = '\0';
+                if (newline > start && newline[-1] == '\r') {
+                    newline[-1] = '\0';
+                }
+                if (*start != '\0') {
+                    handle_stratum_line(start);
+                }
+                start = newline + 1;
+            }
+            size_t left = used - (size_t)(start - input);
+            memmove(input, start, left);
+            used = left;
+            input[used] = '\0';
         }
         close(fd);
         if (!miner_should_stop()) {
@@ -672,7 +1479,27 @@ int btcrig_core_self_test(void) {
     uint8_t header[80] = {0};
     uint8_t out[32];
     sha256d_80(header, out);
-    return memcmp(out, expected, sizeof(expected)) == 0;
+    if (memcmp(out, expected, sizeof(expected)) != 0) {
+        return 0;
+    }
+
+    stratum_template_t tpl;
+    memset(&tpl, 0, sizeof(tpl));
+    copy_checked(tpl.job_id, sizeof(tpl.job_id), "job1");
+    copy_checked(tpl.prevhash, sizeof(tpl.prevhash), "0000000000000000000000000000000000000000000000000000000000000000");
+    copy_checked(tpl.coinb1, sizeof(tpl.coinb1), "0200000001");
+    copy_checked(tpl.coinb2, sizeof(tpl.coinb2), "");
+    copy_checked(tpl.version, sizeof(tpl.version), "20000000");
+    copy_checked(tpl.nbits, sizeof(tpl.nbits), "170fffff");
+    copy_checked(tpl.ntime, sizeof(tpl.ntime), "665ee001");
+    miner_job_t job;
+    if (build_job(&job, &tpl, "abcd1234", "00000001", 0.000000001, 1) != 0) {
+        return 0;
+    }
+    memcpy(header, job.header, sizeof(header));
+    put_le32(header + 76, 5);
+    sha256d_80(header, out);
+    return hash_meets_target(out, job.target);
 }
 
 int btcrig_core_start(const char *config_path) {
@@ -697,6 +1524,20 @@ int btcrig_core_start(const char *config_path) {
     g_stop_requested = 0;
     g_stratum_connected = 0;
     g_stratum_jobs = 0;
+    g_stratum_submits = 0;
+    g_stratum_accepts = 0;
+    g_stratum_rejects = 0;
+    g_extranonce1[0] = '\0';
+    g_extranonce2_size = 4;
+    g_extranonce2_counter = 1;
+    g_difficulty = 1.0;
+    g_job_seq = 0;
+    g_next_nonce = 0;
+    memset(&g_job, 0, sizeof(g_job));
+    memset(&g_template, 0, sizeof(g_template));
+    g_share_head = 0;
+    g_share_tail = 0;
+    g_share_count = 0;
     copy_text(g_pool, sizeof(g_pool), config.pool);
     copy_text(g_user, sizeof(g_user), config.user);
     copy_text(g_pass, sizeof(g_pass), config.pass);
@@ -828,6 +1669,27 @@ uint64_t btcrig_core_stratum_jobs(void) {
     uint64_t jobs = g_stratum_jobs;
     pthread_mutex_unlock(&g_lock);
     return jobs;
+}
+
+uint64_t btcrig_core_stratum_submits(void) {
+    pthread_mutex_lock(&g_lock);
+    uint64_t submits = g_stratum_submits;
+    pthread_mutex_unlock(&g_lock);
+    return submits;
+}
+
+uint64_t btcrig_core_stratum_accepts(void) {
+    pthread_mutex_lock(&g_lock);
+    uint64_t accepts = g_stratum_accepts;
+    pthread_mutex_unlock(&g_lock);
+    return accepts;
+}
+
+uint64_t btcrig_core_stratum_rejects(void) {
+    pthread_mutex_lock(&g_lock);
+    uint64_t rejects = g_stratum_rejects;
+    pthread_mutex_unlock(&g_lock);
+    return rejects;
 }
 
 void btcrig_core_copy_pool(char *out, size_t out_size) {

@@ -6,9 +6,9 @@ Android wrapper/runtime for BTCRig.
 
 - Modern APK first: Android 5.0+ (`minSdk 21`), `compileSdk 36`.
 - Keep the first shell small: native Android UI, foreground service, no extra UI framework.
-- Native core boundary: JNI calls `btcrig_core` for start/stop/status/self-test, CPU SHA256d miner loop, Stratum status, and benchmark.
+- Native core boundary: JNI calls `btcrig_core` for start/stop/status/self-test, CPU SHA256d miner loop, Stratum status/share counters, and benchmark.
 - Default config is copied to the app private files directory as `config.json`; `"cpu_threads": 0` means auto.
-- Stratum currently connects, subscribes, authorizes, and counts `mining.notify` jobs; share submission is not wired yet.
+- Stratum V1 currently connects, subscribes, authorizes, parses `set_difficulty`/`notify`, builds CPU jobs, and submits CPU shares.
 - Legacy Android 4.x support will be a separate target because it needs an old NDK/toolchain path.
 
 ## Build

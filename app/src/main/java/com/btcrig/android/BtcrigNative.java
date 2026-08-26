@@ -26,6 +26,12 @@ final class BtcrigNative {
 
     static native long stratumJobs();
 
+    static native long stratumSubmits();
+
+    static native long stratumAccepts();
+
+    static native long stratumRejects();
+
     static native String pool();
 
     static native String stratumStatus();

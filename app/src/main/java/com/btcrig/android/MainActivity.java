@@ -132,7 +132,10 @@ public final class MainActivity extends Activity {
                     + "\nPool: " + pool
                     + "\nStratum: " + BtcrigNative.stratumStatus()
                     + "\nConnected: " + (BtcrigNative.stratumConnected() ? "yes" : "no")
-                    + "\nJobs: " + BtcrigNative.stratumJobs();
+                    + "\nJobs: " + BtcrigNative.stratumJobs()
+                    + "\nShares: " + BtcrigNative.stratumSubmits()
+                    + " submit / " + BtcrigNative.stratumAccepts()
+                    + " ok / " + BtcrigNative.stratumRejects() + " reject";
             String error = BtcrigNative.lastError();
             if (!error.isEmpty()) {
                 text += "\nLast error: " + error;

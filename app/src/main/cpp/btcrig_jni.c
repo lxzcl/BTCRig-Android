@@ -76,6 +76,27 @@ Java_com_btcrig_android_BtcrigNative_stratumJobs(JNIEnv *env, jclass ignored) {
     return (jlong)btcrig_core_stratum_jobs();
 }
 
+JNIEXPORT jlong JNICALL
+Java_com_btcrig_android_BtcrigNative_stratumSubmits(JNIEnv *env, jclass ignored) {
+    (void)env;
+    (void)ignored;
+    return (jlong)btcrig_core_stratum_submits();
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_btcrig_android_BtcrigNative_stratumAccepts(JNIEnv *env, jclass ignored) {
+    (void)env;
+    (void)ignored;
+    return (jlong)btcrig_core_stratum_accepts();
+}
+
+JNIEXPORT jlong JNICALL
+Java_com_btcrig_android_BtcrigNative_stratumRejects(JNIEnv *env, jclass ignored) {
+    (void)env;
+    (void)ignored;
+    return (jlong)btcrig_core_stratum_rejects();
+}
+
 JNIEXPORT jstring JNICALL
 Java_com_btcrig_android_BtcrigNative_pool(JNIEnv *env, jclass ignored) {
     (void)ignored;

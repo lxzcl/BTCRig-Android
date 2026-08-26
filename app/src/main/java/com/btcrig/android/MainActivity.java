@@ -2,14 +2,19 @@ package com.btcrig.android;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
+import android.text.InputType;
 import android.view.Gravity;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.io.File;
 import java.util.Locale;
@@ -37,6 +42,10 @@ public final class MainActivity extends Activity {
         stop.setText("Stop service");
         stop.setOnClickListener(view -> stopBtcrigService());
 
+        Button editConfig = new Button(this);
+        editConfig.setText("Edit config");
+        editConfig.setOnClickListener(view -> showConfigEditor());
+
         benchmark = new Button(this);
         benchmark.setText("CPU benchmark");
         benchmark.setOnClickListener(view -> runCpuBenchmark());
@@ -48,6 +57,7 @@ public final class MainActivity extends Activity {
         layout.addView(status);
         layout.addView(start);
         layout.addView(stop);
+        layout.addView(editConfig);
         layout.addView(benchmark);
         setContentView(layout);
     }
@@ -78,6 +88,49 @@ public final class MainActivity extends Activity {
                 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[] {Manifest.permission.POST_NOTIFICATIONS}, 1);
         }
+    }
+
+    private void showConfigEditor() {
+        if (BtcrigNative.isRunning()) {
+            Toast.makeText(this, "Stop service before editing config.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        EditText editor = new EditText(this);
+        editor.setGravity(Gravity.START | Gravity.TOP);
+        editor.setInputType(InputType.TYPE_CLASS_TEXT
+                | InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                | InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS);
+        editor.setMinLines(14);
+        editor.setTextSize(14);
+        try {
+            editor.setText(BtcrigConfig.read(this));
+        } catch (Exception e) {
+            Toast.makeText(this, "Config read failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setPadding(24, 0, 24, 0);
+        scroll.addView(editor);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Edit config.json")
+                .setView(scroll)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Save", null)
+                .create();
+        dialog.setOnShowListener(view -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(button -> {
+            try {
+                BtcrigConfig.write(this, editor.getText().toString());
+                status.setText(baseStatus() + serviceLine());
+                Toast.makeText(this, "Config saved.", Toast.LENGTH_SHORT).show();
+                dialog.dismiss();
+            } catch (Exception e) {
+                Toast.makeText(this, "Save failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            }
+        }));
+        dialog.show();
     }
 
     private void runCpuBenchmark() {

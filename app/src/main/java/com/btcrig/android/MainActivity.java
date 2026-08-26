@@ -11,8 +11,11 @@ import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import java.util.Locale;
+
 public final class MainActivity extends Activity {
     private TextView status;
+    private Button benchmark;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -20,7 +23,7 @@ public final class MainActivity extends Activity {
         requestNotificationPermission();
 
         status = new TextView(this);
-        status.setText("BTCRig Android shell\nEngine: not connected");
+        status.setText(baseStatus());
         status.setTextSize(18);
 
         Button start = new Button(this);
@@ -31,6 +34,10 @@ public final class MainActivity extends Activity {
         stop.setText("Stop service");
         stop.setOnClickListener(view -> stopBtcrigService());
 
+        benchmark = new Button(this);
+        benchmark.setText("CPU benchmark");
+        benchmark.setOnClickListener(view -> runCpuBenchmark());
+
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setGravity(Gravity.CENTER);
@@ -38,6 +45,7 @@ public final class MainActivity extends Activity {
         layout.addView(status);
         layout.addView(start);
         layout.addView(stop);
+        layout.addView(benchmark);
         setContentView(layout);
     }
 
@@ -48,14 +56,14 @@ public final class MainActivity extends Activity {
         } else {
             startService(intent);
         }
-        status.setText("BTCRig Android shell\nService: running\nEngine: not connected");
+        status.setText(baseStatus() + "\nService: running");
     }
 
     private void stopBtcrigService() {
         Intent intent = new Intent(this, BtcrigService.class);
         intent.setAction(BtcrigService.ACTION_STOP);
         startService(intent);
-        status.setText("BTCRig Android shell\nService: stopped\nEngine: not connected");
+        status.setText(baseStatus() + "\nService: stopped");
     }
 
     private void requestNotificationPermission() {
@@ -63,5 +71,40 @@ public final class MainActivity extends Activity {
                 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[] {Manifest.permission.POST_NOTIFICATIONS}, 1);
         }
+    }
+
+    private void runCpuBenchmark() {
+        int threads = Math.max(1, Runtime.getRuntime().availableProcessors());
+        benchmark.setEnabled(false);
+        status.setText(baseStatus() + "\nBenchmark: running " + threads + " threads");
+
+        new Thread(() -> {
+            double hps = BtcrigNative.benchmarkCpu(2, threads);
+            runOnUiThread(() -> {
+                benchmark.setEnabled(true);
+                status.setText(baseStatus()
+                        + "\nBenchmark: " + formatHashrate(hps)
+                        + "\nThreads: " + threads);
+            });
+        }).start();
+    }
+
+    private String baseStatus() {
+        return "BTCRig Android shell"
+                + "\nBackend: " + BtcrigNative.backendName()
+                + "\nSelf-test: " + (BtcrigNative.selfTest() ? "ok" : "failed");
+    }
+
+    private static String formatHashrate(double hps) {
+        if (hps >= 1_000_000_000.0) {
+            return String.format(Locale.US, "%.2f GH/s", hps / 1_000_000_000.0);
+        }
+        if (hps >= 1_000_000.0) {
+            return String.format(Locale.US, "%.2f MH/s", hps / 1_000_000.0);
+        }
+        if (hps >= 1_000.0) {
+            return String.format(Locale.US, "%.2f KH/s", hps / 1_000.0);
+        }
+        return String.format(Locale.US, "%.0f H/s", hps);
     }
 }

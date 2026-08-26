@@ -1,0 +1,16 @@
+plugins {
+    id "com.android.application"
+}
+
+android {
+    namespace = "com.btcrig.android"
+    compileSdk = 36
+
+    defaultConfig {
+        applicationId = "com.btcrig.android"
+        minSdk = 21
+        targetSdk = 36
+        versionCode = 1
+        versionName = "0.1.0"
+    }
+}

@@ -17,10 +17,12 @@ public final class BtcrigService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
+            BtcrigNative.stop();
             stopSelf();
             return START_NOT_STICKY;
         }
 
+        BtcrigNative.start();
         createNotificationChannel();
         startForeground(NOTIFICATION_ID, buildNotification());
         return START_STICKY;
@@ -29,6 +31,12 @@ public final class BtcrigService extends Service {
     @Override
     public IBinder onBind(Intent intent) {
         return null;
+    }
+
+    @Override
+    public void onDestroy() {
+        BtcrigNative.stop();
+        super.onDestroy();
     }
 
     private Notification buildNotification() {
@@ -41,7 +49,7 @@ public final class BtcrigService extends Service {
 
         return new Notification.Builder(this, CHANNEL_ID)
                 .setContentTitle("BTCRig is ready")
-                .setContentText("Miner engine is not connected yet.")
+                .setContentText(BtcrigNative.isRunning() ? "Miner core is running." : "Miner core is stopped.")
                 .setSmallIcon(android.R.drawable.stat_sys_upload)
                 .setContentIntent(open)
                 .setOngoing(true)

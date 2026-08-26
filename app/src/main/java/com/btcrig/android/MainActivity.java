@@ -50,6 +50,7 @@ public final class MainActivity extends Activity {
     }
 
     private void startBtcrigService() {
+        BtcrigNative.start();
         Intent intent = new Intent(this, BtcrigService.class);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent);
@@ -60,6 +61,7 @@ public final class MainActivity extends Activity {
     }
 
     private void stopBtcrigService() {
+        BtcrigNative.stop();
         Intent intent = new Intent(this, BtcrigService.class);
         intent.setAction(BtcrigService.ACTION_STOP);
         startService(intent);
@@ -92,7 +94,8 @@ public final class MainActivity extends Activity {
     private String baseStatus() {
         return "BTCRig Android shell"
                 + "\nBackend: " + BtcrigNative.backendName()
-                + "\nSelf-test: " + (BtcrigNative.selfTest() ? "ok" : "failed");
+                + "\nSelf-test: " + (BtcrigNative.selfTest() ? "ok" : "failed")
+                + "\nCore: " + (BtcrigNative.isRunning() ? "running" : "stopped");
     }
 
     private static String formatHashrate(double hps) {

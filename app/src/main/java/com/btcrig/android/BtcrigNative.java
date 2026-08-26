@@ -12,5 +12,11 @@ final class BtcrigNative {
 
     static native boolean selfTest();
 
+    static native boolean start();
+
+    static native void stop();
+
+    static native boolean isRunning();
+
     static native double benchmarkCpu(int seconds, int threads);
 }

@@ -36,7 +36,8 @@ final class BtcrigConfig {
         byte[] data = new byte[(int) Math.min(config.length(), 8192)];
         try (FileInputStream input = new FileInputStream(config)) {
             int n = input.read(data);
-            return n > 0 && new String(data, 0, n, StandardCharsets.UTF_8).contains("\"pool\"");
+            String text = new String(data, 0, n, StandardCharsets.UTF_8);
+            return text.contains("\"pool\"") || text.contains("\"pools\"");
         }
     }
 }

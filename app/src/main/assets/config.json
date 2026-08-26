@@ -1,6 +1,17 @@
 {
-  "pool": "",
-  "user": "",
-  "pass": "x",
-  "cpu_threads": 0
+  "cpu": {
+    "enabled": true,
+    "threads": 0,
+    "affinity": false
+  },
+  "opencl": {
+    "enabled": true,
+    "all-devices": true,
+    "backend": "auto",
+    "kernel": "auto"
+  },
+  "pools": [],
+  "retries": -1,
+  "retry-pause": 2,
+  "print-time": 10
 }

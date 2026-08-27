@@ -30,7 +30,17 @@ public final class MainActivity extends Activity {
     private static final int CARD = Color.WHITE;
     private static final int TEXT = Color.rgb(24, 32, 46);
     private static final int MUTED = Color.rgb(96, 106, 122);
+    private static final int PAGE_HOME = 0;
+    private static final int PAGE_SETTINGS = 1;
+    private static final int PAGE_INFO = 2;
 
+    private LinearLayout content;
+    private LinearLayout homePage;
+    private LinearLayout settingsPage;
+    private LinearLayout infoPage;
+    private Button homeTab;
+    private Button settingsTab;
+    private Button infoTab;
     private TextView backendStatus;
     private TextView selfTestStatus;
     private TextView coreStatus;
@@ -45,6 +55,8 @@ public final class MainActivity extends Activity {
     private TextView errorStatus;
     private TextView configSummary;
     private TextView configStatus;
+    private TextView infoSummary;
+    private TextView infoFiles;
     private TextView benchmarkStatus;
     private Button startButton;
     private Button stopButton;
@@ -82,6 +94,8 @@ public final class MainActivity extends Activity {
         errorStatus = line();
         configSummary = line();
         configStatus = line();
+        infoSummary = line();
+        infoFiles = line();
         benchmarkStatus = line();
 
         startButton = button("Start service");
@@ -99,25 +113,49 @@ public final class MainActivity extends Activity {
         Button logButton = button("View log");
         logButton.setOnClickListener(view -> showLogViewer());
 
+        Button jsonButton = button("Advanced JSON");
+        jsonButton.setOnClickListener(view -> showJsonConfigEditor());
+
+        homeTab = button("Home");
+        homeTab.setOnClickListener(view -> selectPage(PAGE_HOME));
+        settingsTab = button("Settings");
+        settingsTab.setOnClickListener(view -> selectPage(PAGE_SETTINGS));
+        infoTab = button("Info");
+        infoTab.setOnClickListener(view -> selectPage(PAGE_INFO));
+
+        homePage = page();
+        homePage.addView(buttonRow(startButton, stopButton));
+        homePage.addView(benchmarkButton, wide());
+        homePage.addView(card("Status", backendStatus, selfTestStatus, coreStatus, serviceStatus));
+        homePage.addView(card("Hashrate", hashrateStatus, workersStatus, totalStatus, benchmarkStatus));
+        homePage.addView(card("OpenCL", openclStatus));
+        homePage.addView(card("Pool", poolStatus, stratumStatus, sharesStatus, errorStatus));
+
+        settingsPage = page();
+        settingsPage.addView(buttonRow(editConfig, jsonButton));
+        settingsPage.addView(card("Config", configSummary, configStatus));
+
+        infoPage = page();
+        infoPage.addView(logButton, wide());
+        infoPage.addView(card("Info", infoSummary, infoFiles));
+
+        content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setPadding(dp(20), dp(28), dp(20), dp(28));
         root.addView(title);
         root.addView(subtitle);
         root.addView(spacer(16));
-        root.addView(buttonRow(startButton, stopButton));
-        root.addView(buttonRow(editConfig, benchmarkButton));
-        root.addView(logButton, wide());
-        root.addView(card("Status", backendStatus, selfTestStatus, coreStatus, serviceStatus));
-        root.addView(card("Hashrate", hashrateStatus, workersStatus, totalStatus, benchmarkStatus));
-        root.addView(card("OpenCL", openclStatus));
-        root.addView(card("Pool", poolStatus, stratumStatus, sharesStatus, errorStatus));
-        root.addView(card("Config", configSummary, configStatus));
+        root.addView(tabRow());
+        root.addView(content);
 
         ScrollView scroll = new ScrollView(this);
         scroll.setBackgroundColor(BG);
         scroll.addView(root);
         setContentView(scroll);
+        selectPage(PAGE_HOME);
         updateUi();
     }
 
@@ -391,10 +429,16 @@ public final class MainActivity extends Activity {
         openclStatus.setText(openclStatusText());
         configSummary.setText(configSummary());
         try {
-            configStatus.setText("Path: " + BtcrigConfig.ensure(this).getAbsolutePath());
+            String configPath = BtcrigConfig.ensure(this).getAbsolutePath();
+            configStatus.setText("Path: " + configPath);
+            infoFiles.setText("Config: " + configPath + "\nLog: " + new File(getFilesDir(), "btcrig.log").getAbsolutePath());
         } catch (Exception ignored) {
             configStatus.setText("Config unavailable");
+            infoFiles.setText("Files unavailable");
         }
+        infoSummary.setText("Backend: " + BtcrigNative.backendName()
+                + "\nSelf-test: " + (BtcrigNative.selfTest() ? "ok" : "failed")
+                + "\nOpenCL:\n" + openclStatus.getText());
     }
 
     private String configuredPool() {
@@ -438,6 +482,20 @@ public final class MainActivity extends Activity {
         }, 2000);
     }
 
+    private void selectPage(int page) {
+        content.removeAllViews();
+        content.addView(page == PAGE_SETTINGS ? settingsPage : page == PAGE_INFO ? infoPage : homePage);
+        homeTab.setEnabled(page != PAGE_HOME);
+        settingsTab.setEnabled(page != PAGE_SETTINGS);
+        infoTab.setEnabled(page != PAGE_INFO);
+    }
+
+    private LinearLayout page() {
+        LinearLayout page = new LinearLayout(this);
+        page.setOrientation(LinearLayout.VERTICAL);
+        return page;
+    }
+
     private LinearLayout card(String title, View... views) {
         TextView heading = new TextView(this);
         heading.setText(title);
@@ -470,6 +528,16 @@ public final class MainActivity extends Activity {
         row.setGravity(Gravity.CENTER);
         row.addView(left, weighted());
         row.addView(right, weighted());
+        return row;
+    }
+
+    private LinearLayout tabRow() {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER);
+        row.addView(homeTab, weighted());
+        row.addView(settingsTab, weighted());
+        row.addView(infoTab, weighted());
         return row;
     }
 

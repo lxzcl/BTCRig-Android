@@ -38,6 +38,8 @@ final class BtcrigNative {
 
     static native String lastError();
 
+    static native String openclStatus(String configPath);
+
     static native double hashrate();
 
     static native double benchmarkCpu(int seconds, int threads);

@@ -24,6 +24,7 @@ uint64_t btcrig_core_stratum_rejects(void);
 void btcrig_core_copy_pool(char *out, size_t out_size);
 void btcrig_core_copy_stratum_status(char *out, size_t out_size);
 void btcrig_core_copy_last_error(char *out, size_t out_size);
+void btcrig_core_copy_opencl_status(const char *config_path, char *out, size_t out_size);
 double btcrig_core_benchmark_cpu(int seconds, int threads);
 
 #ifdef __cplusplus

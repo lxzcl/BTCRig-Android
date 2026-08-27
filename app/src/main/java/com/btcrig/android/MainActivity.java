@@ -38,6 +38,7 @@ public final class MainActivity extends Activity {
     private TextView hashrateStatus;
     private TextView workersStatus;
     private TextView totalStatus;
+    private TextView openclStatus;
     private TextView poolStatus;
     private TextView stratumStatus;
     private TextView sharesStatus;
@@ -74,6 +75,7 @@ public final class MainActivity extends Activity {
         hashrateStatus = bigMetric();
         workersStatus = line();
         totalStatus = line();
+        openclStatus = line();
         poolStatus = line();
         stratumStatus = line();
         sharesStatus = line();
@@ -108,6 +110,7 @@ public final class MainActivity extends Activity {
         root.addView(logButton, wide());
         root.addView(card("Status", backendStatus, selfTestStatus, coreStatus, serviceStatus));
         root.addView(card("Hashrate", hashrateStatus, workersStatus, totalStatus, benchmarkStatus));
+        root.addView(card("OpenCL", openclStatus));
         root.addView(card("Pool", poolStatus, stratumStatus, sharesStatus, errorStatus));
         root.addView(card("Config", configSummary, configStatus));
 
@@ -385,6 +388,7 @@ public final class MainActivity extends Activity {
 
         String error = BtcrigNative.lastError();
         errorStatus.setText(error.isEmpty() ? "Last error: none" : "Last error: " + error);
+        openclStatus.setText(openclStatusText());
         configSummary.setText(configSummary());
         try {
             configStatus.setText("Path: " + BtcrigConfig.ensure(this).getAbsolutePath());
@@ -409,6 +413,14 @@ public final class MainActivity extends Activity {
                     + " / OpenCL: " + (basic.openclEnabled ? "enabled" : "disabled");
         } catch (Exception ignored) {
             return "Config summary unavailable";
+        }
+    }
+
+    private String openclStatusText() {
+        try {
+            return BtcrigNative.openclStatus(BtcrigConfig.ensure(this).getAbsolutePath());
+        } catch (Exception e) {
+            return "Config: unavailable\nRuntime: not probed\nMode: CPU only\nReason: " + e.getMessage();
         }
     }
 

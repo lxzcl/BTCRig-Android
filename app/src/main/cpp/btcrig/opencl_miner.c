@@ -1,6 +1,7 @@
 #include "opencl_miner.h"
 #include "opencl_loader.h"
 
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -637,6 +638,20 @@ static void set_error(char *error, size_t error_size, const char *message, cl_in
     }
 }
 
+static void append_text(char *out, size_t out_size, const char *fmt, ...) {
+    if (out == NULL || out_size == 0) {
+        return;
+    }
+    size_t used = strlen(out);
+    if (used >= out_size - 1) {
+        return;
+    }
+    va_list args;
+    va_start(args, fmt);
+    vsnprintf(out + used, out_size - used, fmt, args);
+    va_end(args);
+}
+
 static uint32_t config_u32_or(uint32_t value, uint32_t fallback) {
     return value == 0 ? fallback : value;
 }
@@ -1216,6 +1231,105 @@ int opencl_miner_resolve_devices(const miner_opencl_config_t *config,
         return -1;
     }
     return found;
+}
+
+static const char *opencl_device_type_name(cl_device_type type) {
+    if ((type & CL_DEVICE_TYPE_GPU) != 0) {
+        return "GPU";
+    }
+    if ((type & CL_DEVICE_TYPE_CPU) != 0) {
+        return "CPU";
+    }
+    if ((type & CL_DEVICE_TYPE_ACCELERATOR) != 0) {
+        return "accelerator";
+    }
+    return "unknown";
+}
+
+int opencl_miner_describe_devices(const miner_opencl_config_t *config,
+                                  char *out,
+                                  size_t out_size) {
+    if (out == NULL || out_size == 0) {
+        return 0;
+    }
+    out[0] = '\0';
+
+    if (config == NULL || !config->enabled) {
+        append_text(out, out_size, "Config: disabled\nRuntime: not probed\nMode: CPU only");
+        return 0;
+    }
+
+    miner_opencl_device_config_t resolved[MINER_OPENCL_MAX_DEVICES];
+    char error[512];
+    error[0] = '\0';
+    int count = opencl_miner_resolve_devices(config, resolved, MINER_OPENCL_MAX_DEVICES, error, sizeof(error));
+    if (count <= 0) {
+        append_text(out,
+                    out_size,
+                    "Config: enabled\nRuntime: unavailable\nMode: CPU only\nReason: %s",
+                    error[0] != '\0' ? error : "no usable OpenCL GPU devices");
+        return 0;
+    }
+
+    append_text(out,
+                out_size,
+                "Config: enabled\nRuntime: available\nDevices: %d\nMode: CPU + OpenCL when service starts",
+                count);
+    for (int i = 0; i < count; ++i) {
+        miner_opencl_config_t single = *config;
+        single.all_devices = 0;
+        single.device_count = 0;
+        single.platform = resolved[i].platform;
+        single.device = resolved[i].device;
+
+        cl_platform_id platform = NULL;
+        cl_device_id device = NULL;
+        error[0] = '\0';
+        if (select_platform_device(&single, &platform, &device, error, sizeof(error)) != 0) {
+            append_text(out,
+                        out_size,
+                        "\n#%d platform=%d device=%d unavailable: %s",
+                        i,
+                        resolved[i].platform,
+                        resolved[i].device,
+                        error[0] != '\0' ? error : "device query failed");
+            continue;
+        }
+
+        char name[128] = "";
+        char vendor[128] = "";
+        char version[128] = "";
+        cl_device_type type = 0;
+        (void)clGetDeviceInfo(device, CL_DEVICE_NAME, sizeof(name), name, NULL);
+        (void)clGetDeviceInfo(device, CL_DEVICE_VENDOR, sizeof(vendor), vendor, NULL);
+        (void)clGetDeviceInfo(device, CL_DEVICE_VERSION, sizeof(version), version, NULL);
+        (void)clGetDeviceInfo(device, CL_DEVICE_TYPE, sizeof(type), &type, NULL);
+
+        char backend_error[256];
+        backend_error[0] = '\0';
+        int backend = resolve_backend_variant(device,
+                                              version,
+                                              resolved[i].backend_variant,
+                                              backend_error,
+                                              sizeof(backend_error));
+        append_text(out,
+                    out_size,
+                    "\n#%d %s / %s / %s / %s / backend=%s / kernel=%s / batch=%u / local=%u / npi=%u",
+                    i,
+                    opencl_device_type_name(type),
+                    vendor[0] != '\0' ? vendor : "unknown vendor",
+                    name[0] != '\0' ? name : "unknown device",
+                    version[0] != '\0' ? version : "unknown version",
+                    backend >= 0 ? opencl_backend_variant_name(backend) : opencl_backend_variant_name(resolved[i].backend_variant),
+                    opencl_kernel_variant_name(resolved[i].kernel_variant),
+                    resolved[i].batch_size,
+                    resolved[i].local_work_size,
+                    resolved[i].nonces_per_work_item);
+        if (backend < 0 && backend_error[0] != '\0') {
+            append_text(out, out_size, " / backend warning: %s", backend_error);
+        }
+    }
+    return count;
 }
 
 static int build_program(opencl_miner_t *miner, char *error, size_t error_size) {

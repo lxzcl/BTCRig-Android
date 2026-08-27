@@ -1,6 +1,7 @@
 #include "btcrig_core.h"
 
 #include "miner.h"
+#include "opencl_miner.h"
 #include "sha256d.h"
 #include "stratum.h"
 
@@ -594,6 +595,16 @@ void btcrig_core_copy_last_error(char *out, size_t out_size) {
     pthread_mutex_lock(&g_lock);
     copy_text(out, out_size, g_last_error);
     pthread_mutex_unlock(&g_lock);
+}
+
+void btcrig_core_copy_opencl_status(const char *config_path, char *out, size_t out_size) {
+#if defined(BTC_MINER_OPENCL)
+    core_config_t config = read_config(config_path);
+    opencl_miner_describe_devices(&config.opencl, out, out_size);
+#else
+    (void)config_path;
+    copy_text(out, out_size, "Config: unavailable\nRuntime: not built\nMode: CPU only");
+#endif
 }
 
 double btcrig_core_benchmark_cpu(int seconds, int threads) {

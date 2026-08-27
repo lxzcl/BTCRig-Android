@@ -35,6 +35,9 @@ int opencl_miner_resolve_devices(const miner_opencl_config_t *config,
                                  int max_devices,
                                  char *error,
                                  size_t error_size);
+int opencl_miner_describe_devices(const miner_opencl_config_t *config,
+                                  char *out,
+                                  size_t out_size);
 
 int opencl_miner_scan(opencl_miner_t *miner,
                       const sha256_midstate_t *state,

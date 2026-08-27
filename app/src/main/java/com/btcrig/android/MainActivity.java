@@ -5,10 +5,14 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.graphics.Color;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.Gravity;
+import android.view.View;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
@@ -18,11 +22,32 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.util.Locale;
 
 public final class MainActivity extends Activity {
-    private TextView status;
-    private Button benchmark;
+    private static final int BG = Color.rgb(245, 247, 251);
+    private static final int CARD = Color.WHITE;
+    private static final int TEXT = Color.rgb(24, 32, 46);
+    private static final int MUTED = Color.rgb(96, 106, 122);
+
+    private TextView backendStatus;
+    private TextView selfTestStatus;
+    private TextView coreStatus;
+    private TextView serviceStatus;
+    private TextView hashrateStatus;
+    private TextView workersStatus;
+    private TextView totalStatus;
+    private TextView poolStatus;
+    private TextView stratumStatus;
+    private TextView sharesStatus;
+    private TextView errorStatus;
+    private TextView configSummary;
+    private TextView configStatus;
+    private TextView benchmarkStatus;
+    private Button startButton;
+    private Button stopButton;
+    private Button benchmarkButton;
     private boolean refreshScheduled;
     private String serviceState = "";
 
@@ -31,39 +56,90 @@ public final class MainActivity extends Activity {
         super.onCreate(state);
         requestNotificationPermission();
 
-        status = new TextView(this);
-        status.setText(baseStatus());
-        status.setTextSize(18);
+        TextView title = new TextView(this);
+        title.setText("BTCRig");
+        title.setTextColor(TEXT);
+        title.setTextSize(34);
+        title.setTypeface(Typeface.DEFAULT_BOLD);
 
-        Button start = new Button(this);
-        start.setText("Start service");
-        start.setOnClickListener(view -> startBtcrigService());
+        TextView subtitle = new TextView(this);
+        subtitle.setText("Android miner shell");
+        subtitle.setTextColor(MUTED);
+        subtitle.setTextSize(15);
 
-        Button stop = new Button(this);
-        stop.setText("Stop service");
-        stop.setOnClickListener(view -> stopBtcrigService());
+        backendStatus = line();
+        selfTestStatus = line();
+        coreStatus = line();
+        serviceStatus = line();
+        hashrateStatus = bigMetric();
+        workersStatus = line();
+        totalStatus = line();
+        poolStatus = line();
+        stratumStatus = line();
+        sharesStatus = line();
+        errorStatus = line();
+        configSummary = line();
+        configStatus = line();
+        benchmarkStatus = line();
 
-        Button editConfig = new Button(this);
-        editConfig.setText("Configure");
+        startButton = button("Start service");
+        startButton.setOnClickListener(view -> startBtcrigService());
+
+        stopButton = button("Stop service");
+        stopButton.setOnClickListener(view -> stopBtcrigService());
+
+        Button editConfig = button("Configure");
         editConfig.setOnClickListener(view -> showBasicConfigEditor());
 
-        benchmark = new Button(this);
-        benchmark.setText("CPU benchmark");
-        benchmark.setOnClickListener(view -> runCpuBenchmark());
+        benchmarkButton = button("CPU benchmark");
+        benchmarkButton.setOnClickListener(view -> runCpuBenchmark());
 
-        LinearLayout layout = new LinearLayout(this);
-        layout.setOrientation(LinearLayout.VERTICAL);
-        layout.setGravity(Gravity.CENTER);
-        layout.setPadding(48, 48, 48, 48);
-        layout.addView(status);
-        layout.addView(start);
-        layout.addView(stop);
-        layout.addView(editConfig);
-        layout.addView(benchmark);
-        setContentView(layout);
+        Button logButton = button("View log");
+        logButton.setOnClickListener(view -> showLogViewer());
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(20), dp(28), dp(20), dp(28));
+        root.addView(title);
+        root.addView(subtitle);
+        root.addView(spacer(16));
+        root.addView(buttonRow(startButton, stopButton));
+        root.addView(buttonRow(editConfig, benchmarkButton));
+        root.addView(logButton, wide());
+        root.addView(card("Status", backendStatus, selfTestStatus, coreStatus, serviceStatus));
+        root.addView(card("Hashrate", hashrateStatus, workersStatus, totalStatus, benchmarkStatus));
+        root.addView(card("Pool", poolStatus, stratumStatus, sharesStatus, errorStatus));
+        root.addView(card("Config", configSummary, configStatus));
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setBackgroundColor(BG);
+        scroll.addView(root);
+        setContentView(scroll);
+        updateUi();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        updateUi();
+        if (BtcrigNative.isRunning()) {
+            scheduleRefresh();
+        }
     }
 
     private void startBtcrigService() {
+        try {
+            BtcrigConfig.Basic basic = BtcrigConfig.readBasic(this);
+            if (basic.poolUrl.trim().isEmpty() || basic.user.trim().isEmpty()) {
+                Toast.makeText(this, "Configure pool and user first.", Toast.LENGTH_LONG).show();
+                showBasicConfigEditor();
+                return;
+            }
+        } catch (Exception e) {
+            Toast.makeText(this, "Config read failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            return;
+        }
+
         Intent intent = new Intent(this, BtcrigService.class);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent);
@@ -71,7 +147,7 @@ public final class MainActivity extends Activity {
             startService(intent);
         }
         serviceState = "running";
-        status.setText(baseStatus() + serviceLine());
+        updateUi();
         scheduleRefresh();
     }
 
@@ -80,7 +156,7 @@ public final class MainActivity extends Activity {
         intent.setAction(BtcrigService.ACTION_STOP);
         startService(intent);
         serviceState = "stopped";
-        status.setText(baseStatus() + serviceLine());
+        updateUi();
         scheduleRefresh();
     }
 
@@ -116,7 +192,7 @@ public final class MainActivity extends Activity {
 
         LinearLayout form = new LinearLayout(this);
         form.setOrientation(LinearLayout.VERTICAL);
-        form.setPadding(48, 0, 48, 0);
+        form.setPadding(dp(24), 0, dp(24), 0);
         addLabeled(form, "Pool URL", poolUrl);
         addLabeled(form, "User / worker", user);
         addLabeled(form, "Password", pass);
@@ -144,7 +220,7 @@ public final class MainActivity extends Activity {
                     next.cpuThreads = parseThreads(cpuThreads.getText().toString());
                     next.openclEnabled = opencl.isChecked();
                     BtcrigConfig.writeBasic(this, next);
-                    status.setText(baseStatus() + serviceLine());
+                    updateUi();
                     Toast.makeText(this, "Config saved.", Toast.LENGTH_SHORT).show();
                     dialog.dismiss();
                 } catch (Exception e) {
@@ -167,6 +243,7 @@ public final class MainActivity extends Activity {
     private void addLabeled(LinearLayout form, String label, EditText input) {
         TextView text = new TextView(this);
         text.setText(label);
+        text.setTextColor(MUTED);
         text.setTextSize(14);
         form.addView(text);
         form.addView(input);
@@ -201,7 +278,7 @@ public final class MainActivity extends Activity {
         }
 
         ScrollView scroll = new ScrollView(this);
-        scroll.setPadding(24, 0, 24, 0);
+        scroll.setPadding(dp(12), 0, dp(12), 0);
         scroll.addView(editor);
 
         AlertDialog dialog = new AlertDialog.Builder(this)
@@ -213,7 +290,7 @@ public final class MainActivity extends Activity {
         dialog.setOnShowListener(view -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(button -> {
             try {
                 BtcrigConfig.write(this, editor.getText().toString());
-                status.setText(baseStatus() + serviceLine());
+                updateUi();
                 Toast.makeText(this, "Config saved.", Toast.LENGTH_SHORT).show();
                 dialog.dismiss();
             } catch (Exception e) {
@@ -223,21 +300,116 @@ public final class MainActivity extends Activity {
         dialog.show();
     }
 
+    private void showLogViewer() {
+        TextView log = new TextView(this);
+        log.setText(readTail(new File(getFilesDir(), "btcrig.log"), 64 * 1024));
+        log.setTextIsSelectable(true);
+        log.setTextSize(12);
+        log.setTypeface(Typeface.MONOSPACE);
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setPadding(dp(12), 0, dp(12), 0);
+        scroll.addView(log);
+
+        new AlertDialog.Builder(this)
+                .setTitle("btcrig.log")
+                .setView(scroll)
+                .setPositiveButton("Close", null)
+                .show();
+    }
+
+    private static String readTail(File file, int maxBytes) {
+        if (!file.exists()) {
+            return "(log not found)";
+        }
+        try (FileInputStream input = new FileInputStream(file)) {
+            long skip = Math.max(0, file.length() - maxBytes);
+            while (skip > 0) {
+                long skipped = input.skip(skip);
+                if (skipped <= 0) {
+                    break;
+                }
+                skip -= skipped;
+            }
+            byte[] buffer = new byte[(int) Math.min(maxBytes, file.length())];
+            int n = input.read(buffer);
+            return n > 0 ? new String(buffer, 0, n) : "(empty log)";
+        } catch (Exception e) {
+            return "Log read failed: " + e.getMessage();
+        }
+    }
+
     private void runCpuBenchmark() {
         int threads = Math.max(1, Runtime.getRuntime().availableProcessors());
-        benchmark.setEnabled(false);
-        status.setText(baseStatus() + "\nBenchmark: running " + threads + " threads");
+        benchmarkButton.setEnabled(false);
+        benchmarkStatus.setText("Benchmark: running " + threads + " threads");
 
         new Thread(() -> {
             double hps = BtcrigNative.benchmarkCpu(2, threads);
             runOnUiThread(() -> {
-                benchmark.setEnabled(true);
-                status.setText(baseStatus()
-                        + "\nBenchmark: " + formatHashrate(hps)
-                        + "\nThreads: " + threads
-                        + serviceLine());
+                benchmarkButton.setEnabled(true);
+                benchmarkStatus.setText("Benchmark: " + formatHashrate(hps) + " / " + threads + " threads");
             });
         }).start();
+    }
+
+    private void updateUi() {
+        boolean running = BtcrigNative.isRunning();
+        backendStatus.setText("Backend: " + BtcrigNative.backendName());
+        selfTestStatus.setText("Self-test: " + (BtcrigNative.selfTest() ? "ok" : "failed"));
+        coreStatus.setText("Core: " + (running ? "running" : "stopped"));
+        serviceStatus.setText("Service: " + (serviceState.isEmpty() ? (running ? "running" : "stopped") : serviceState));
+        startButton.setEnabled(!running);
+        stopButton.setEnabled(running);
+
+        if (running) {
+            String pool = BtcrigNative.pool();
+            hashrateStatus.setText(formatHashrate(BtcrigNative.hashrate()));
+            workersStatus.setText("Workers: " + BtcrigNative.workerCount());
+            totalStatus.setText("Total: " + BtcrigNative.totalHashes());
+            poolStatus.setText("Pool: " + (pool.isEmpty() ? "(not configured)" : pool));
+            stratumStatus.setText("Stratum: " + BtcrigNative.stratumStatus()
+                    + " / connected: " + (BtcrigNative.stratumConnected() ? "yes" : "no")
+                    + " / jobs: " + BtcrigNative.stratumJobs());
+            sharesStatus.setText("Shares: " + BtcrigNative.stratumSubmits()
+                    + " submit / " + BtcrigNative.stratumAccepts()
+                    + " ok / " + BtcrigNative.stratumRejects() + " reject");
+        } else {
+            hashrateStatus.setText("-- H/s");
+            workersStatus.setText("Workers: --");
+            totalStatus.setText("Total: --");
+            poolStatus.setText("Pool: " + configuredPool());
+            stratumStatus.setText("Stratum: stopped");
+            sharesStatus.setText("Shares: --");
+        }
+
+        String error = BtcrigNative.lastError();
+        errorStatus.setText(error.isEmpty() ? "Last error: none" : "Last error: " + error);
+        configSummary.setText(configSummary());
+        try {
+            configStatus.setText("Path: " + BtcrigConfig.ensure(this).getAbsolutePath());
+        } catch (Exception ignored) {
+            configStatus.setText("Config unavailable");
+        }
+    }
+
+    private String configuredPool() {
+        try {
+            String pool = BtcrigConfig.readBasic(this).poolUrl;
+            return pool.trim().isEmpty() ? "not configured" : pool;
+        } catch (Exception ignored) {
+            return "unavailable";
+        }
+    }
+
+    private String configSummary() {
+        try {
+            BtcrigConfig.Basic basic = BtcrigConfig.readBasic(this);
+            return "CPU threads: " + basic.cpuThreads
+                    + " / OpenCL: " + (basic.openclEnabled ? "enabled" : "disabled");
+        } catch (Exception ignored) {
+            return "Config summary unavailable";
+        }
     }
 
     private void scheduleRefresh() {
@@ -245,52 +417,99 @@ public final class MainActivity extends Activity {
             return;
         }
         refreshScheduled = true;
-        status.postDelayed(() -> {
+        coreStatus.postDelayed(() -> {
             refreshScheduled = false;
-            status.setText(baseStatus() + serviceLine());
+            updateUi();
             if (BtcrigNative.isRunning()) {
                 scheduleRefresh();
             }
         }, 2000);
     }
 
-    private String serviceLine() {
-        return serviceState.isEmpty() ? "" : "\nService: " + serviceState;
+    private LinearLayout card(String title, View... views) {
+        TextView heading = new TextView(this);
+        heading.setText(title);
+        heading.setTextColor(TEXT);
+        heading.setTextSize(17);
+        heading.setTypeface(Typeface.DEFAULT_BOLD);
+
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setPadding(dp(18), dp(16), dp(18), dp(16));
+        card.setBackground(roundRect(CARD, dp(18)));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            card.setElevation(dp(2));
+        }
+        card.addView(heading);
+        card.addView(spacer(8));
+        for (View view : views) {
+            card.addView(view);
+        }
+
+        LinearLayout.LayoutParams params = wide();
+        params.setMargins(0, dp(12), 0, 0);
+        card.setLayoutParams(params);
+        return card;
     }
 
-    private String baseStatus() {
-        boolean running = BtcrigNative.isRunning();
-        String text = "BTCRig Android shell"
-                + "\nBackend: " + BtcrigNative.backendName()
-                + "\nSelf-test: " + (BtcrigNative.selfTest() ? "ok" : "failed")
-                + "\nCore: " + (running ? "running" : "stopped");
-        if (running) {
-            String pool = BtcrigNative.pool();
-            if (pool.isEmpty()) {
-                pool = "(not configured)";
-            }
-            text += "\nMiner: " + formatHashrate(BtcrigNative.hashrate())
-                    + "\nWorkers: " + BtcrigNative.workerCount()
-                    + "\nTotal: " + BtcrigNative.totalHashes()
-                    + "\nPool: " + pool
-                    + "\nStratum: " + BtcrigNative.stratumStatus()
-                    + "\nConnected: " + (BtcrigNative.stratumConnected() ? "yes" : "no")
-                    + "\nJobs: " + BtcrigNative.stratumJobs()
-                    + "\nShares: " + BtcrigNative.stratumSubmits()
-                    + " submit / " + BtcrigNative.stratumAccepts()
-                    + " ok / " + BtcrigNative.stratumRejects() + " reject";
-            String error = BtcrigNative.lastError();
-            if (!error.isEmpty()) {
-                text += "\nLast error: " + error;
-            }
-        }
-        try {
-            File config = BtcrigConfig.ensure(this);
-            text += "\nConfig: " + config.getAbsolutePath();
-        } catch (Exception ignored) {
-            text += "\nConfig: unavailable";
-        }
-        return text;
+    private LinearLayout buttonRow(Button left, Button right) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER);
+        row.addView(left, weighted());
+        row.addView(right, weighted());
+        return row;
+    }
+
+    private Button button(String text) {
+        Button button = new Button(this);
+        button.setText(text);
+        return button;
+    }
+
+    private TextView line() {
+        TextView view = new TextView(this);
+        view.setTextColor(MUTED);
+        view.setTextSize(14);
+        view.setPadding(0, dp(2), 0, dp(2));
+        return view;
+    }
+
+    private TextView bigMetric() {
+        TextView view = line();
+        view.setTextColor(TEXT);
+        view.setTextSize(30);
+        view.setTypeface(Typeface.DEFAULT_BOLD);
+        return view;
+    }
+
+    private View spacer(int dp) {
+        View view = new View(this);
+        view.setLayoutParams(new LinearLayout.LayoutParams(1, dp(dp)));
+        return view;
+    }
+
+    private LinearLayout.LayoutParams wide() {
+        return new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+    }
+
+    private LinearLayout.LayoutParams weighted() {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1);
+        params.setMargins(dp(2), 0, dp(2), 0);
+        return params;
+    }
+
+    private GradientDrawable roundRect(int color, int radius) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setColor(color);
+        drawable.setCornerRadius(radius);
+        return drawable;
+    }
+
+    private int dp(int value) {
+        return (int) (value * getResources().getDisplayMetrics().density + 0.5f);
     }
 
     private static String formatHashrate(double hps) {

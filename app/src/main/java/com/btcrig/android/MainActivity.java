@@ -10,6 +10,7 @@ import android.os.Bundle;
 import android.text.InputType;
 import android.view.Gravity;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -43,8 +44,8 @@ public final class MainActivity extends Activity {
         stop.setOnClickListener(view -> stopBtcrigService());
 
         Button editConfig = new Button(this);
-        editConfig.setText("Edit config");
-        editConfig.setOnClickListener(view -> showConfigEditor());
+        editConfig.setText("Configure");
+        editConfig.setOnClickListener(view -> showBasicConfigEditor());
 
         benchmark = new Button(this);
         benchmark.setText("CPU benchmark");
@@ -90,7 +91,96 @@ public final class MainActivity extends Activity {
         }
     }
 
-    private void showConfigEditor() {
+    private void showBasicConfigEditor() {
+        if (BtcrigNative.isRunning()) {
+            Toast.makeText(this, "Stop service before editing config.", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        BtcrigConfig.Basic basic;
+        try {
+            basic = BtcrigConfig.readBasic(this);
+        } catch (Exception e) {
+            Toast.makeText(this, "Config read failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        EditText poolUrl = oneLine("stratum+tcp://host:port", basic.poolUrl);
+        EditText user = oneLine("wallet.worker", basic.user);
+        EditText pass = oneLine("x", basic.pass);
+        EditText cpuThreads = oneLine("0 = auto", String.valueOf(basic.cpuThreads));
+        cpuThreads.setInputType(InputType.TYPE_CLASS_NUMBER);
+        CheckBox opencl = new CheckBox(this);
+        opencl.setText("Enable OpenCL when available");
+        opencl.setChecked(basic.openclEnabled);
+
+        LinearLayout form = new LinearLayout(this);
+        form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(48, 0, 48, 0);
+        addLabeled(form, "Pool URL", poolUrl);
+        addLabeled(form, "User / worker", user);
+        addLabeled(form, "Password", pass);
+        addLabeled(form, "CPU threads", cpuThreads);
+        form.addView(opencl);
+
+        AlertDialog dialog = new AlertDialog.Builder(this)
+                .setTitle("Configure")
+                .setView(form)
+                .setNegativeButton("Cancel", null)
+                .setNeutralButton("Advanced JSON", null)
+                .setPositiveButton("Save", null)
+                .create();
+        dialog.setOnShowListener(view -> {
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener(button -> {
+                dialog.dismiss();
+                showJsonConfigEditor();
+            });
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(button -> {
+                try {
+                    BtcrigConfig.Basic next = new BtcrigConfig.Basic();
+                    next.poolUrl = poolUrl.getText().toString();
+                    next.user = user.getText().toString();
+                    next.pass = pass.getText().toString();
+                    next.cpuThreads = parseThreads(cpuThreads.getText().toString());
+                    next.openclEnabled = opencl.isChecked();
+                    BtcrigConfig.writeBasic(this, next);
+                    status.setText(baseStatus() + serviceLine());
+                    Toast.makeText(this, "Config saved.", Toast.LENGTH_SHORT).show();
+                    dialog.dismiss();
+                } catch (Exception e) {
+                    Toast.makeText(this, "Save failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                }
+            });
+        });
+        dialog.show();
+    }
+
+    private EditText oneLine(String hint, String text) {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setHint(hint);
+        input.setText(text);
+        input.setSelectAllOnFocus(false);
+        return input;
+    }
+
+    private void addLabeled(LinearLayout form, String label, EditText input) {
+        TextView text = new TextView(this);
+        text.setText(label);
+        text.setTextSize(14);
+        form.addView(text);
+        form.addView(input);
+    }
+
+    private static int parseThreads(String text) {
+        try {
+            return Math.max(0, Integer.parseInt(text.trim()));
+        } catch (Exception ignored) {
+            return 0;
+        }
+    }
+
+    private void showJsonConfigEditor() {
         if (BtcrigNative.isRunning()) {
             Toast.makeText(this, "Stop service before editing config.", Toast.LENGTH_SHORT).show();
             return;

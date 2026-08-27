@@ -7,6 +7,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
@@ -30,6 +31,9 @@ public final class MainActivity extends Activity {
     private static final int CARD = Color.WHITE;
     private static final int TEXT = Color.rgb(24, 32, 46);
     private static final int MUTED = Color.rgb(96, 106, 122);
+    private static final int ACCENT = Color.rgb(76, 111, 255);
+    private static final int SOFT = Color.rgb(236, 240, 255);
+    private static final int BORDER = Color.rgb(226, 231, 241);
     private static final int PAGE_HOME = 0;
     private static final int PAGE_SETTINGS = 1;
     private static final int PAGE_INFO = 2;
@@ -68,6 +72,13 @@ public final class MainActivity extends Activity {
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         requestNotificationPermission();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            getWindow().setStatusBarColor(BG);
+            getWindow().setNavigationBarColor(BG);
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+        }
 
         TextView title = new TextView(this);
         title.setText("BTCRig");
@@ -76,7 +87,7 @@ public final class MainActivity extends Activity {
         title.setTypeface(Typeface.DEFAULT_BOLD);
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("Android miner shell");
+        subtitle.setText("Android miner shell · CPU / OpenCL");
         subtitle.setTextColor(MUTED);
         subtitle.setTextSize(15);
 
@@ -176,6 +187,12 @@ public final class MainActivity extends Activity {
                 showBasicConfigEditor();
                 return;
             }
+            if (basic.cpuThreads <= 0 && !basic.openclEnabled) {
+                Toast.makeText(this, "Enable CPU threads or OpenCL first.", Toast.LENGTH_LONG).show();
+                showBasicConfigEditor();
+                return;
+            }
+            BtcrigConfig.writeBasic(this, basic);
         } catch (Exception e) {
             Toast.makeText(this, "Config read failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
             return;
@@ -225,7 +242,7 @@ public final class MainActivity extends Activity {
         EditText poolUrl = oneLine("stratum+tcp://host:port", basic.poolUrl);
         EditText user = oneLine("wallet.worker", basic.user);
         EditText pass = oneLine("x", basic.pass);
-        EditText cpuThreads = oneLine("0 = auto", String.valueOf(basic.cpuThreads));
+        EditText cpuThreads = oneLine("0 = disabled", String.valueOf(basic.cpuThreads));
         cpuThreads.setInputType(InputType.TYPE_CLASS_NUMBER);
         CheckBox opencl = new CheckBox(this);
         opencl.setText("Enable OpenCL when available");
@@ -453,7 +470,7 @@ public final class MainActivity extends Activity {
     private String configSummary() {
         try {
             BtcrigConfig.Basic basic = BtcrigConfig.readBasic(this);
-            return "CPU threads: " + basic.cpuThreads
+            return "CPU: " + (basic.cpuThreads > 0 ? basic.cpuThreads + " threads" : "disabled")
                     + " / OpenCL: " + (basic.openclEnabled ? "enabled" : "disabled");
         } catch (Exception ignored) {
             return "Config summary unavailable";
@@ -485,9 +502,14 @@ public final class MainActivity extends Activity {
     private void selectPage(int page) {
         content.removeAllViews();
         content.addView(page == PAGE_SETTINGS ? settingsPage : page == PAGE_INFO ? infoPage : homePage);
-        homeTab.setEnabled(page != PAGE_HOME);
-        settingsTab.setEnabled(page != PAGE_SETTINGS);
-        infoTab.setEnabled(page != PAGE_INFO);
+        styleTab(homeTab, page == PAGE_HOME);
+        styleTab(settingsTab, page == PAGE_SETTINGS);
+        styleTab(infoTab, page == PAGE_INFO);
+    }
+
+    private void styleTab(Button tab, boolean selected) {
+        tab.setTextColor(selected ? Color.WHITE : MUTED);
+        setBackground(tab, roundRect(selected ? ACCENT : SOFT, dp(18), selected ? ACCENT : SOFT, 1));
     }
 
     private LinearLayout page() {
@@ -506,7 +528,7 @@ public final class MainActivity extends Activity {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.VERTICAL);
         card.setPadding(dp(18), dp(16), dp(18), dp(16));
-        card.setBackground(roundRect(CARD, dp(18)));
+        setBackground(card, roundRect(CARD, dp(20), BORDER, 1));
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             card.setElevation(dp(2));
         }
@@ -535,6 +557,8 @@ public final class MainActivity extends Activity {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER);
+        row.setPadding(dp(4), dp(4), dp(4), dp(4));
+        setBackground(row, roundRect(SOFT, dp(22), BORDER, 1));
         row.addView(homeTab, weighted());
         row.addView(settingsTab, weighted());
         row.addView(infoTab, weighted());
@@ -544,6 +568,14 @@ public final class MainActivity extends Activity {
     private Button button(String text) {
         Button button = new Button(this);
         button.setText(text);
+        button.setTextColor(TEXT);
+        button.setTextSize(14);
+        button.setPadding(dp(12), dp(8), dp(12), dp(8));
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            button.setAllCaps(false);
+            button.setElevation(0);
+        }
+        setBackground(button, roundRect(CARD, dp(16), BORDER, 1));
         return button;
     }
 
@@ -582,10 +614,26 @@ public final class MainActivity extends Activity {
     }
 
     private GradientDrawable roundRect(int color, int radius) {
+        return roundRect(color, radius, 0, 0);
+    }
+
+    private GradientDrawable roundRect(int color, int radius, int strokeColor, int strokeWidth) {
         GradientDrawable drawable = new GradientDrawable();
         drawable.setColor(color);
         drawable.setCornerRadius(radius);
+        if (strokeWidth > 0) {
+            drawable.setStroke(dp(strokeWidth), strokeColor);
+        }
         return drawable;
+    }
+
+    @SuppressWarnings("deprecation")
+    private void setBackground(View view, Drawable drawable) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
+            view.setBackground(drawable);
+        } else {
+            view.setBackgroundDrawable(drawable);
+        }
     }
 
     private int dp(int value) {

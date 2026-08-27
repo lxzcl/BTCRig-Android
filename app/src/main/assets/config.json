@@ -1,6 +1,6 @@
 {
   "cpu": {
-    "enabled": true,
+    "enabled": false,
     "threads": 0,
     "affinity": false
   },

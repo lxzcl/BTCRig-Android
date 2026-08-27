@@ -55,7 +55,10 @@ public final class BtcrigService extends Service {
 
     @SuppressWarnings("deprecation")
     private Notification buildNotification() {
-        Intent openIntent = new Intent(this, MainActivity.class);
+        Intent openIntent = getPackageManager().getLaunchIntentForPackage(getPackageName());
+        if (openIntent == null) {
+            openIntent = new Intent(this, MainActivity.class);
+        }
         PendingIntent open = PendingIntent.getActivity(
                 this,
                 0,

@@ -11,7 +11,6 @@ set(BTCRIG_SRC
     btcrig/opencl_loader.c
     btcrig/opencl_miner.c
     btcrig/sha256d.c
-    btcrig/sha256d_arm_sha2.c
     btcrig/stratum.c
     third_party/jansson/src/dtoa.c
     third_party/jansson/src/dump.c
@@ -30,10 +29,18 @@ set(BTCRIG_SRC
 
 add_library(btcrig_core SHARED ${BTCRIG_SRC})
 
+if(ANDROID_ABI STREQUAL "arm64-v8a")
+    target_sources(btcrig_core PRIVATE btcrig/sha256d_arm_sha2.c)
+    target_compile_definitions(btcrig_core PRIVATE BTC_MINER_ARM_SHA2)
+    set_source_files_properties(
+        btcrig/sha256d_arm_sha2.c
+        PROPERTIES COMPILE_OPTIONS "-march=armv8-a+crypto"
+    )
+endif()
+
 target_compile_features(btcrig_core PRIVATE c_std_11)
 target_compile_options(btcrig_core PRIVATE -Wall -Wextra)
 target_compile_definitions(btcrig_core PRIVATE
-    BTC_MINER_ARM_SHA2
     BTC_MINER_OPENCL
     HAVE_CONFIG_H
 )
@@ -45,8 +52,3 @@ target_include_directories(btcrig_core PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/OpenCL
 )
 target_link_libraries(btcrig_core PRIVATE dl m)
-
-set_source_files_properties(
-    btcrig/sha256d_arm_sha2.c
-    PROPERTIES COMPILE_OPTIONS "-march=armv8-a+crypto"
-)

@@ -74,6 +74,9 @@ final class BtcrigConfig {
         JSONObject cpu = root.optJSONObject("cpu");
         if (cpu != null) {
             basic.cpuThreads = cpu.optInt("threads", basic.cpuThreads);
+            if (!cpu.optBoolean("enabled", basic.cpuThreads > 0)) {
+                basic.cpuThreads = 0;
+            }
         } else {
             basic.cpuThreads = root.optInt("cpu_threads", basic.cpuThreads);
         }
@@ -114,8 +117,9 @@ final class BtcrigConfig {
             cpu = new JSONObject().put("affinity", false);
             root.put("cpu", cpu);
         }
-        cpu.put("enabled", true);
-        cpu.put("threads", Math.max(0, basic.cpuThreads));
+        int cpuThreads = Math.max(0, basic.cpuThreads);
+        cpu.put("enabled", cpuThreads > 0);
+        cpu.put("threads", cpuThreads);
 
         JSONObject opencl = root.optJSONObject("opencl");
         if (opencl == null) {

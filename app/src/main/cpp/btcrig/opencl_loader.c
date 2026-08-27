@@ -46,6 +46,22 @@ static void clear_error(char *error, size_t error_size) {
     }
 }
 
+static void set_open_failure(const char *name) {
+    if (name == NULL || name[0] == '\0') {
+        return;
+    }
+#if defined(_WIN32)
+    char message[256];
+    snprintf(message, sizeof(message), "failed to load %s", name);
+    set_loader_error(message);
+#else
+    const char *detail = dlerror();
+    char message[256];
+    snprintf(message, sizeof(message), "failed to load %s: %s", name, detail != NULL ? detail : "unknown error");
+    set_loader_error(message);
+#endif
+}
+
 static int try_open_library(const char *name) {
     if (name == NULL || name[0] == '\0') {
         return -1;
@@ -53,8 +69,12 @@ static int try_open_library(const char *name) {
 #if defined(_WIN32)
     g_opencl.library = LoadLibraryA(name);
 #else
+    (void)dlerror();
     g_opencl.library = dlopen(name, RTLD_NOW | RTLD_LOCAL);
 #endif
+    if (g_opencl.library == NULL) {
+        set_open_failure(name);
+    }
     return g_opencl.library != NULL ? 0 : -1;
 }
 
@@ -71,6 +91,9 @@ static int open_library(void) {
     }
 #else
 #if defined(__ANDROID__)
+    if (try_open_library("libOpenCL.so") == 0) {
+        return 0;
+    }
     static const char *const android_opencl_names[] = {
         "/system_ext/lib64/libOpenCL_system.so",
         "/system_ext/lib/libOpenCL_system.so",
@@ -83,13 +106,16 @@ static int open_library(void) {
     for (int i = 0; g_opencl.library == NULL && android_opencl_names[i] != NULL; ++i) {
         try_open_library(android_opencl_names[i]);
     }
-#endif
+#else
     if (g_opencl.library == NULL && try_open_library("libOpenCL.so.1") != 0) {
         try_open_library("libOpenCL.so");
     }
 #endif
+#endif
     if (g_opencl.library == NULL) {
-        set_loader_error("OpenCL runtime library not found");
+        if (g_opencl.error[0] == '\0') {
+            set_loader_error("OpenCL runtime library not found");
+        }
         return -1;
     }
     return 0;

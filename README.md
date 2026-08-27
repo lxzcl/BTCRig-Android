@@ -9,6 +9,7 @@ Android wrapper/runtime for BTCRig.
 - Native core boundary: JNI calls `btcrig_core` for start/stop/status/self-test and benchmark.
 - Native core imports BTCRig miner/Stratum sources, vendored Jansson JSON parsing, ARMv8 SHA2 CPU path, and the OpenCL runtime loader/miner path.
 - Default config is copied to the app private files directory as `config.json`; `"cpu.threads": 0` means auto and `"opencl.enabled": true` tries vendor OpenCL at runtime.
+- The APK declares optional `libOpenCL.so` access so Android linker namespaces can expose vendor OpenCL when the device publishes it.
 - The main screen uses native Android cards for core status, hashrate, OpenCL visibility, pool/share status, config summary, and log viewing.
 - The app has a minimal Configure form for pool/user/password/CPU/OpenCL, with `config.json` kept under Advanced JSON; form saves preserve other JSON fields. Stop the service before saving changes.
 - Native stdout/stderr is appended to `files/btcrig.log` with one rotated `btcrig.log.1`.

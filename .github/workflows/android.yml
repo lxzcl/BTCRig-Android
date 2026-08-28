@@ -35,7 +35,12 @@ jobs:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > "$RUNNER_TEMP/btcrig-android.jks"
+          clean_key="$(printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '[:space:]')"
+          echo "keystore base64 chars: ${#clean_key}"
+          test -n "$clean_key"
+          test -n "$ANDROID_KEYSTORE_PASSWORD"
+          printf '%s' "$clean_key" | base64 --decode > "$RUNNER_TEMP/btcrig-android.jks"
+          ls -l "$RUNNER_TEMP/btcrig-android.jks"
           test -s "$RUNNER_TEMP/btcrig-android.jks"
           keytool -list -keystore "$RUNNER_TEMP/btcrig-android.jks" -storepass "$ANDROID_KEYSTORE_PASSWORD" >/dev/null
 

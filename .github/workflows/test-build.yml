@@ -30,5 +30,28 @@ jobs:
           yes | sdkmanager --licenses >/dev/null
           sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;3.22.1"
 
+      - name: Decode signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > "$RUNNER_TEMP/btcrig-android.jks"
+            test -s "$RUNNER_TEMP/btcrig-android.jks"
+            keytool -list -keystore "$RUNNER_TEMP/btcrig-android.jks" -storepass "$ANDROID_KEYSTORE_PASSWORD" >/dev/null
+          fi
+
       - name: Build debug APK
+        env:
+          ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/btcrig-android.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: BTCRig-Android-test-debug
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

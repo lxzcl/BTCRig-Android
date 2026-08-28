@@ -454,7 +454,14 @@ static int conn_read(stratum_conn_t *conn, char *data, size_t len) {
 
     if (conn->use_tls) {
 #if defined(__ANDROID__)
-        return btcrig_android_tls_read(conn->android_tls_id, data, len);
+        int n = btcrig_android_tls_read(conn->android_tls_id, data, len);
+        if (n < 0 && n != -3) {
+            char tls_error[256];
+            btcrig_android_tls_last_error(tls_error, sizeof(tls_error));
+            fprintf(stderr, "%s[TLS]%s Android TLS read failed: %s\n",
+                    C_BRIGHT_RED, C_RESET, tls_error[0] != '\0' ? tls_error : "unknown");
+        }
+        return n;
 #else
         int n = SSL_read(conn->ssl, data, (int)len);
         if (n <= 0) {
@@ -495,7 +502,18 @@ static int conn_pending(stratum_conn_t *conn) {
 static int conn_wait_read(stratum_conn_t *conn, int timeout_ms) {
 #if defined(__ANDROID__)
     if (conn != NULL && conn->use_tls && conn->android_tls_id >= 0) {
-        return 1;
+        int pending = btcrig_android_tls_pending(conn->android_tls_id);
+        if (pending > 0 || pending == -2) {
+            return 1;
+        }
+        if (pending < 0) {
+            char tls_error[256];
+            btcrig_android_tls_last_error(tls_error, sizeof(tls_error));
+            fprintf(stderr, "%s[TLS]%s Android TLS read failed: %s\n",
+                    C_BRIGHT_RED, C_RESET, tls_error[0] != '\0' ? tls_error : "unknown");
+            return -1;
+        }
+        return -3;
     }
 #endif
     fd_set readfds;

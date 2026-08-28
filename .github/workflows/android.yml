@@ -31,7 +31,13 @@ jobs:
           sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;3.22.1"
 
       - name: Decode signing key
-        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$RUNNER_TEMP/btcrig-android.jks"
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > "$RUNNER_TEMP/btcrig-android.jks"
+          test -s "$RUNNER_TEMP/btcrig-android.jks"
+          keytool -list -keystore "$RUNNER_TEMP/btcrig-android.jks" -storepass "$ANDROID_KEYSTORE_PASSWORD" >/dev/null
 
       - name: Build signed APKs
         env:

@@ -13,6 +13,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -603,6 +604,19 @@ private fun HashrateText(text: String) {
     val split = text.lastIndexOf(' ')
     val value = if (split > 0) text.substring(0, split) else text
     val unit = if (split > 0) text.substring(split + 1) else ""
+    val numeric = value.toFloatOrNull()
+    val animated by animateFloatAsState(
+        targetValue = numeric ?: 0f,
+        animationSpec = tween(700),
+        label = "hashrate-value",
+    )
+    val displayValue = if (numeric == null) {
+        value
+    } else if (unit == "H/s") {
+        String.format(Locale.US, "%.0f", animated)
+    } else {
+        String.format(Locale.US, "%.2f", animated)
+    }
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Center,
@@ -618,7 +632,7 @@ private fun HashrateText(text: String) {
                 fontWeight = FontWeight.Bold,
             )
         }
-        Text(value, fontSize = 56.sp, fontWeight = FontWeight.Bold)
+        Text(displayValue, fontSize = 56.sp, fontWeight = FontWeight.Bold)
         if (unit.isNotBlank()) {
             Text(
                 unit,

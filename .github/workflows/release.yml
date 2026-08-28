@@ -1,0 +1,119 @@
+name: Android Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - VERSION
+      - .github/workflows/release.yml
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Publish signed APK to GitHub Releases"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version
+        id: version
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Detect release trigger
+        id: release_trigger
+        run: |
+          publish=false
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            publish="${{ github.event.inputs.publish_release || 'false' }}"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            before="${{ github.event.before }}"
+            sha="${{ github.sha }}"
+            if ! printf '%s' "$before" | grep -Eq '^0+$' && git diff --name-only "$before" "$sha" | grep -Fxq VERSION; then
+              publish=true
+            fi
+          fi
+
+          git fetch --tags --quiet
+          if [ "$publish" = "true" ] && git rev-parse -q --verify "refs/tags/${{ steps.version.outputs.tag }}" >/dev/null; then
+            echo "::notice::Tag ${{ steps.version.outputs.tag }} already exists; bump VERSION to publish a new release."
+            publish=false
+          fi
+          echo "publish=${publish}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@v4
+        if: steps.release_trigger.outputs.publish == 'true'
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - uses: android-actions/setup-android@v3
+        if: steps.release_trigger.outputs.publish == 'true'
+
+      - name: Install Android SDK packages
+        if: steps.release_trigger.outputs.publish == 'true'
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;3.22.1"
+
+      - name: Decode signing key
+        if: steps.release_trigger.outputs.publish == 'true'
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 --decode > "$RUNNER_TEMP/btcrig-android.jks"
+          test -s "$RUNNER_TEMP/btcrig-android.jks"
+          keytool -list -keystore "$RUNNER_TEMP/btcrig-android.jks" -storepass "$ANDROID_KEYSTORE_PASSWORD" >/dev/null
+
+      - name: Build signed release APK
+        if: steps.release_trigger.outputs.publish == 'true'
+        env:
+          ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/btcrig-android.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Prepare APK
+        if: steps.release_trigger.outputs.publish == 'true'
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk "BTCRig-Android-${{ steps.version.outputs.tag }}.apk"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs "BTCRig-Android-${{ steps.version.outputs.tag }}.apk"
+
+      - name: Write release notes
+        if: steps.release_trigger.outputs.publish == 'true'
+        run: |
+          cat > release-notes.md <<EOF
+          Signed Android APK for BTCRig Android ${{ steps.version.outputs.tag }}.
+
+          - Package: com.btcrig.android
+          - Minimum Android: 5.0 / API 21
+          - ABIs: arm64-v8a, armeabi-v7a
+          EOF
+
+      - name: Publish GitHub Release
+        if: steps.release_trigger.outputs.publish == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: BTCRig Android ${{ steps.version.outputs.tag }}
+          body_path: release-notes.md
+          files: BTCRig-Android-${{ steps.version.outputs.tag }}.apk
+          fail_on_unmatched_files: true
+          generate_release_notes: true

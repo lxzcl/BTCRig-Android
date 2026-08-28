@@ -3,6 +3,13 @@ plugins {
     id "org.jetbrains.kotlin.plugin.compose"
 }
 
+def btcrigVersion = rootProject.file("VERSION").text.trim()
+def btcrigVersionParts = btcrigVersion.tokenize(".")*.toInteger()
+if (btcrigVersionParts.size() != 3) {
+    throw new GradleException("VERSION must be major.minor.patch")
+}
+def btcrigVersionCode = btcrigVersionParts[0] * 10000 + btcrigVersionParts[1] * 100 + btcrigVersionParts[2]
+
 android {
     namespace = "com.btcrig.android"
     compileSdk = 36
@@ -18,8 +25,8 @@ android {
         applicationId = "com.btcrig.android"
         minSdk = 21
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = btcrigVersionCode
+        versionName = btcrigVersion
         externalNativeBuild {
             cmake {
                 cFlags "-O3"

@@ -26,4 +26,6 @@ app/build/outputs/apk/debug/app-debug.apk
 
 ## GitHub Actions
 
-Pushing to `main` or opening a pull request builds the debug APK and uploads it as an artifact.
+`Android Test Build` runs on every `main` push and pull request.
+
+`Android Release` publishes a signed APK directly to GitHub Releases when `VERSION` changes on `main`.

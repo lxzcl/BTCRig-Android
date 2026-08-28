@@ -36,6 +36,7 @@ typedef struct {
     double difficulty;
     double started_at;
     double connected_at;
+    double display_hashrate;
     double last_share_difficulty;
     double best_share_difficulty;
     double last_result_difficulty;
@@ -57,6 +58,7 @@ typedef struct {
 typedef struct {
     double now;
     uint64_t hashes;
+    double hashrate;
     int worker_count;
     int connected;
     int subscribed;

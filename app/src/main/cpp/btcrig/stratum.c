@@ -1333,6 +1333,7 @@ static void maybe_print_stats(stratum_state_t *state,
 
     uint64_t hashes = miner_hashes(state->miner);
     double rate = (double)(hashes - *last_hashes) / (now - *last_time);
+    state->display_hashrate = rate;
     printf("%s[STATS]%s rate=",
            C_BRIGHT_GREEN,
            C_RESET);
@@ -1365,6 +1366,7 @@ static void publish_stats(const stratum_state_t *state, const stratum_client_con
     memset(&snapshot, 0, sizeof(snapshot));
     snapshot.now = monotonic_seconds();
     snapshot.hashes = state->miner != NULL ? miner_hashes(state->miner) : 0;
+    snapshot.hashrate = state->display_hashrate;
     snapshot.worker_count = state->miner != NULL ? miner_thread_count(state->miner) : 0;
     snapshot.connected = 1;
     snapshot.subscribed = state->subscribed;

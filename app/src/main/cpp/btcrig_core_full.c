@@ -20,8 +20,6 @@
 #define BENCHMARK_DIFFICULTY 100000.0
 #define DONATION_CYCLE_MINUTES 100
 #define DONATION_USER "bc1qqz0wutk9kk5mmaf7fu4dm5w4fq4fhaah9hpzr3"
-#define HASHRATE_SMOOTHING_ALPHA 0.25
-#define HASHRATE_IDLE_SECONDS 30.0
 
 typedef struct {
     char pool[256];
@@ -57,8 +55,6 @@ typedef struct {
     uint64_t conn_accepts;
     uint64_t conn_rejects;
     double hashrate;
-    double last_time;
-    uint64_t last_hashes;
     int worker_count;
     int connected;
 } core_stats_t;
@@ -201,25 +197,9 @@ static void update_stats(void *opaque, const stratum_snapshot_t *snapshot) {
         g_stats.base_submits += g_stats.conn_submits;
         g_stats.base_accepts += g_stats.conn_accepts;
         g_stats.base_rejects += g_stats.conn_rejects;
-        g_stats.last_time = 0.0;
-        g_stats.last_hashes = 0;
     }
 
-    if (g_stats.last_time <= 0.0) {
-        g_stats.last_time = snapshot->now;
-        g_stats.last_hashes = snapshot->hashes;
-    } else if (snapshot->hashes > g_stats.last_hashes && snapshot->now > g_stats.last_time) {
-        double instant = (double)(snapshot->hashes - g_stats.last_hashes) / (snapshot->now - g_stats.last_time);
-        g_stats.hashrate = g_stats.hashrate <= 0.0 ?
-            instant :
-            g_stats.hashrate * (1.0 - HASHRATE_SMOOTHING_ALPHA) + instant * HASHRATE_SMOOTHING_ALPHA;
-        g_stats.last_time = snapshot->now;
-        g_stats.last_hashes = snapshot->hashes;
-    } else if (snapshot->now - g_stats.last_time > HASHRATE_IDLE_SECONDS) {
-        g_stats.hashrate = 0.0;
-        g_stats.last_time = snapshot->now;
-        g_stats.last_hashes = snapshot->hashes;
-    }
+    g_stats.hashrate = snapshot->hashrate;
     g_stats.conn_hashes = snapshot->hashes;
     g_stats.conn_jobs = snapshot->jobs;
     g_stats.conn_submits = snapshot->submits;

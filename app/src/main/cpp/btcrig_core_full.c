@@ -17,16 +17,22 @@
 #include <unistd.h>
 
 #define CORE_LOG_MAX_BYTES (1024 * 1024)
+#define BENCHMARK_DIFFICULTY 100000.0
+#define DONATION_CYCLE_MINUTES 100
+#define DONATION_USER "bc1qqz0wutk9kk5mmaf7fu4dm5w4fq4fhaah9hpzr3"
 
 typedef struct {
     char pool[256];
     char user[256];
+    char donation_user[256];
     char pass[128];
     int cpu_enabled;
     int cpu_threads;
     int cpu_affinity;
     int retries;
     int retry_pause;
+    int tls_compat;
+    int donation_percent;
     double difficulty;
     double stats_interval;
     miner_opencl_config_t opencl;
@@ -84,6 +90,28 @@ static int available_processors(void) {
         return 1;
     }
     return count > 256 ? 256 : (int)count;
+}
+
+static int donation_level_or_zero(int level) {
+    if (level <= 0) {
+        return 0;
+    }
+    return level >= DONATION_CYCLE_MINUTES ? DONATION_CYCLE_MINUTES - 1 : level;
+}
+
+static double donation_phase_seconds(int level, int donating) {
+    int minutes = donating ? level : DONATION_CYCLE_MINUTES - level;
+    return (double)minutes * 60.0;
+}
+
+static double donation_initial_user_seconds(int level) {
+    uint64_t seed = (uint64_t)time(NULL);
+    seed ^= (uint64_t)getpid() << 32;
+    seed ^= seed >> 12;
+    seed ^= seed << 25;
+    seed ^= seed >> 27;
+    double unit = (double)((seed * UINT64_C(2685821657736338717)) >> 11) * (1.0 / 9007199254740992.0);
+    return donation_phase_seconds(level, 0) * (0.5 + unit);
 }
 
 static void set_status(const char *status, const char *error) {
@@ -309,10 +337,13 @@ static core_config_t read_config(const char *path) {
     core_config_t config;
     memset(&config, 0, sizeof(config));
     copy_text(config.pass, sizeof(config.pass), "x");
+    copy_text(config.donation_user, sizeof(config.donation_user), DONATION_USER);
     config.cpu_enabled = 1;
     config.cpu_threads = 0;
     config.retries = -1;
     config.retry_pause = 2;
+    config.tls_compat = 1;
+    config.donation_percent = 1;
     config.stats_interval = 10.0;
     miner_opencl_config_defaults(&config.opencl);
     config.opencl.enabled = 1;
@@ -334,7 +365,24 @@ static core_config_t read_config(const char *path) {
     config.cpu_threads = json_int_or(json_object_get(root, "cpu_threads"), config.cpu_threads);
     config.retries = json_int_or(json_object_get(root, "retries"), config.retries);
     config.retry_pause = json_int_or(json_object_get(root, "retry-pause"), config.retry_pause);
+    config.tls_compat = json_bool_or(json_object_get(root, "tls_compat"), config.tls_compat);
+    config.donation_percent = json_int_or(json_object_get(root, "donate-level"), config.donation_percent);
+    config.donation_percent = json_int_or(json_object_get(root, "donation_percent"), config.donation_percent);
     config.stats_interval = json_number_or(json_object_get(root, "print-time"), config.stats_interval);
+
+    json_t *tls = json_object_get(root, "tls");
+    if (json_is_object(tls)) {
+        config.tls_compat = json_bool_or(json_object_get(tls, "compat"), config.tls_compat);
+    }
+
+    json_t *donation = json_object_get(root, "donation");
+    if (json_is_object(donation)) {
+        config.donation_percent = json_int_or(json_object_get(donation, "percent"), config.donation_percent);
+        config.donation_percent = json_int_or(json_object_get(donation, "level"), config.donation_percent);
+        json_copy_string(json_object_get(donation, "address"), config.donation_user, sizeof(config.donation_user));
+        json_copy_string(json_object_get(donation, "user"), config.donation_user, sizeof(config.donation_user));
+        json_copy_string(json_object_get(donation, "wallet"), config.donation_user, sizeof(config.donation_user));
+    }
 
     json_t *cpu = json_object_get(root, "cpu");
     if (json_is_object(cpu)) {
@@ -398,12 +446,22 @@ static core_config_t read_config(const char *path) {
     if (config.retry_pause < 1) {
         config.retry_pause = 1;
     }
+    config.donation_percent = donation_level_or_zero(config.donation_percent);
     return config;
 }
 
 static void *run_core(void *opaque) {
     (void)opaque;
     int attempt = 0;
+    int donating = 0;
+    int donation_enabled = g_config.donation_percent > 0 &&
+        g_config.donation_user[0] != '\0' &&
+        strcmp(g_config.donation_user, g_config.user) != 0;
+    double phase_seconds = donation_enabled ? donation_initial_user_seconds(g_config.donation_percent) : 0.0;
+
+    if (donation_enabled) {
+        printf("[DONATE] level=%d%% address=%s pool=same-as-user\n", g_config.donation_percent, g_config.donation_user);
+    }
 
     for (;;) {
         if (g_stop_requested) {
@@ -420,6 +478,7 @@ static void *run_core(void *opaque) {
 
         ++attempt;
         set_status("running full core", "");
+        const char *run_user = donating ? g_config.donation_user : g_config.user;
 
         stratum_client_config_t client;
         memset(&client, 0, sizeof(client));
@@ -427,13 +486,26 @@ static void *run_core(void *opaque) {
         client.cpu_affinity = g_config.cpu_affinity;
         client.enable_mining = 1;
         client.opencl = g_config.opencl;
+        client.tls_compat = g_config.tls_compat;
         client.stats_interval = g_config.stats_interval;
+        client.session_seconds = phase_seconds;
+        client.session_label = donating ? "donate" : "user";
         client.on_stats = update_stats;
 
-        int rc = stratum_run_client(g_config.pool, g_config.user, g_config.pass, g_config.difficulty, &client);
+        int rc = stratum_run_client(g_config.pool, run_user, g_config.pass, g_config.difficulty, &client);
         mark_disconnected();
         if (g_stop_requested) {
             break;
+        }
+        if (donation_enabled && rc == 0) {
+            donating = !donating;
+            phase_seconds = donation_phase_seconds(g_config.donation_percent, donating);
+            attempt = 0;
+            continue;
+        }
+        if (donating) {
+            donating = 0;
+            phase_seconds = donation_phase_seconds(g_config.donation_percent, 0);
         }
         char error[128];
         snprintf(error, sizeof(error), "core returned %d", rc);
@@ -607,6 +679,14 @@ void btcrig_core_copy_opencl_status(const char *config_path, char *out, size_t o
 #endif
 }
 
+static void prepare_benchmark_job(miner_job_t *job) {
+    memset(job, 0, sizeof(*job));
+    copy_text(job->job_id, sizeof(job->job_id), "bench");
+    copy_text(job->extranonce2, sizeof(job->extranonce2), "00000000");
+    copy_text(job->ntime, sizeof(job->ntime), "00000000");
+    miner_target_from_difficulty(BENCHMARK_DIFFICULTY, job->target);
+}
+
 double btcrig_core_benchmark_cpu(int seconds, int threads) {
     if (seconds < 1) {
         seconds = 1;
@@ -622,11 +702,7 @@ double btcrig_core_benchmark_cpu(int seconds, int threads) {
     }
 
     miner_job_t job;
-    memset(&job, 0, sizeof(job));
-    copy_text(job.job_id, sizeof(job.job_id), "bench");
-    copy_text(job.extranonce2, sizeof(job.extranonce2), "00000000");
-    copy_text(job.ntime, sizeof(job.ntime), "00000000");
-    memset(job.target, 0xff, sizeof(job.target));
+    prepare_benchmark_job(&job);
     miner_set_job(miner, &job);
 
     struct timespec ts;
@@ -637,4 +713,58 @@ double btcrig_core_benchmark_cpu(int seconds, int threads) {
     uint64_t hashes = miner_hashes(miner);
     miner_destroy(miner);
     return (double)hashes / (double)seconds;
+}
+
+double btcrig_core_benchmark_cpu_backend(const char *backend, int seconds, int threads) {
+    sha256d_backend_t requested;
+    if (backend == NULL ||
+        sha256d_parse_backend(backend, &requested) != 0 ||
+        !sha256d_backend_available(requested) ||
+        btcrig_core_is_running()) {
+        return -1.0;
+    }
+
+    sha256d_backend_t previous = sha256d_get_backend();
+    if (sha256d_set_backend(requested) != 0) {
+        return -1.0;
+    }
+    double hps = btcrig_core_benchmark_cpu(seconds, threads);
+    (void)sha256d_set_backend(previous);
+    return hps;
+}
+
+double btcrig_core_benchmark_opencl(const char *config_path, int seconds) {
+#if defined(BTC_MINER_OPENCL)
+    if (btcrig_core_is_running()) {
+        return -1.0;
+    }
+    if (seconds < 1) {
+        seconds = 1;
+    }
+
+    core_config_t config = read_config(config_path);
+    config.opencl.enabled = 1;
+    miner_t *miner = miner_create_with_backend_options(0, &config.opencl, NULL);
+    if (miner == NULL || miner_start(miner) != 0) {
+        miner_destroy(miner);
+        return -1.0;
+    }
+
+    miner_job_t job;
+    prepare_benchmark_job(&job);
+    miner_set_job(miner, &job);
+
+    struct timespec ts;
+    ts.tv_sec = seconds;
+    ts.tv_nsec = 0;
+    nanosleep(&ts, NULL);
+
+    uint64_t hashes = miner_hashes(miner);
+    miner_destroy(miner);
+    return (double)hashes / (double)seconds;
+#else
+    (void)config_path;
+    (void)seconds;
+    return -1.0;
+#endif
 }

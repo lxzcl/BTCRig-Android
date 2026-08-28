@@ -1,7 +1,6 @@
 {
   "cpu": {
-    "enabled": false,
-    "threads": 0,
+    "enabled": true,
     "affinity": false
   },
   "opencl": {
@@ -10,7 +9,21 @@
     "backend": "auto",
     "kernel": "auto"
   },
-  "pools": [],
+  "tls": {
+    "compat": true
+  },
+  "donation": {
+    "percent": 1,
+    "address": "bc1qqz0wutk9kk5mmaf7fu4dm5w4fq4fhaah9hpzr3"
+  },
+  "donate-level": 1,
+  "pools": [
+    {
+      "url": "stratum+tcp://public-pool.io:3333",
+      "user": "bc1qqz0wutk9kk5mmaf7fu4dm5w4fq4fhaah9hpzr3",
+      "pass": "x"
+    }
+  ],
   "retries": -1,
   "retry-pause": 2,
   "print-time": 10

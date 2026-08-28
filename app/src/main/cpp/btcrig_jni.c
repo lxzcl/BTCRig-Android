@@ -140,3 +140,32 @@ Java_com_btcrig_android_BtcrigNative_benchmarkCpu(JNIEnv *env, jclass ignored, j
     (void)ignored;
     return btcrig_core_benchmark_cpu(seconds, threads);
 }
+
+JNIEXPORT jdouble JNICALL
+Java_com_btcrig_android_BtcrigNative_benchmarkCpuBackend(JNIEnv *env,
+                                                         jclass ignored,
+                                                         jstring backend,
+                                                         jint seconds,
+                                                         jint threads) {
+    (void)ignored;
+    const char *name = backend == NULL ? NULL : (*env)->GetStringUTFChars(env, backend, NULL);
+    double hps = btcrig_core_benchmark_cpu_backend(name, seconds, threads);
+    if (name != NULL) {
+        (*env)->ReleaseStringUTFChars(env, backend, name);
+    }
+    return hps;
+}
+
+JNIEXPORT jdouble JNICALL
+Java_com_btcrig_android_BtcrigNative_benchmarkOpencl(JNIEnv *env,
+                                                     jclass ignored,
+                                                     jstring config_path,
+                                                     jint seconds) {
+    (void)ignored;
+    const char *path = config_path == NULL ? NULL : (*env)->GetStringUTFChars(env, config_path, NULL);
+    double hps = btcrig_core_benchmark_opencl(path, seconds);
+    if (path != NULL) {
+        (*env)->ReleaseStringUTFChars(env, config_path, path);
+    }
+    return hps;
+}

@@ -340,14 +340,14 @@ static int conn_open_once(stratum_conn_t *conn,
     return 0;
 }
 
-static int conn_open(stratum_conn_t *conn, const pool_endpoint_t *endpoint) {
+static int conn_open(stratum_conn_t *conn, const pool_endpoint_t *endpoint, int tls_compat) {
     int tls_handshake_failed = 0;
 
     if (conn_open_once(conn, endpoint, endpoint->verify_tls, &tls_handshake_failed) == 0) {
         return 0;
     }
 
-    if (endpoint->use_tls && endpoint->verify_tls && tls_handshake_failed) {
+    if (endpoint->use_tls && endpoint->verify_tls && tls_compat && tls_handshake_failed) {
         fprintf(stderr,
                 "%s[TLS]%s verified handshake failed, retrying compatible mode verify=off sni=on\n",
                 C_YELLOW, C_RESET);
@@ -1316,6 +1316,7 @@ int stratum_run_client(const char *url,
     double stop_at = config != NULL ? config->stop_at : 0.0;
     double session_seconds = config != NULL ? config->session_seconds : 0.0;
     const char *session_label = config != NULL ? config->session_label : NULL;
+    int tls_compat = config == NULL || config->tls_compat;
     double session_stop_at = 0.0;
     int run_result = 0;
 
@@ -1332,7 +1333,7 @@ int stratum_run_client(const char *url,
            endpoint.use_tls ? C_BRIGHT_GREEN : C_GRAY,
            endpoint.use_tls ? "tls" : "tcp",
            C_RESET);
-    if (conn_open(&conn, &endpoint) != 0) {
+    if (conn_open(&conn, &endpoint, tls_compat) != 0) {
         perror("[NET] connect");
         return 1;
     }

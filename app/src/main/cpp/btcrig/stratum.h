@@ -75,6 +75,7 @@ typedef struct {
     int enable_mining;
     miner_opencl_config_t opencl;
     miner_cuda_config_t cuda;
+    int tls_compat;
     double stats_interval;
     double stop_at;
     double session_seconds;

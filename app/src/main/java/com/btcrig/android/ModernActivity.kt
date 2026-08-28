@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
 import androidx.activity.ComponentActivity
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -27,12 +28,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -42,12 +45,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -61,9 +65,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -76,6 +86,7 @@ class ModernActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         requestNotificationPermission()
 
         setContent {
@@ -84,8 +95,13 @@ class ModernActivity : ComponentActivity() {
             var showJson by remember { mutableStateOf(false) }
             var showLog by remember { mutableStateOf(false) }
             var basic by remember { mutableStateOf(readBasic()) }
-            var benchmark by remember { mutableStateOf("") }
+            var benchmark by remember { mutableStateOf(defaultBenchmarkText()) }
             var benchmarking by remember { mutableStateOf(false) }
+            fun saveBasic(next: BtcrigConfig.Basic) {
+                basic = next
+                runCatching { BtcrigConfig.writeBasic(this, next) }
+                    .onFailure { error -> toast("Save failed: ${error.message}") }
+            }
             fun refreshSoon() {
                 Thread {
                     Thread.sleep(700)
@@ -124,28 +140,35 @@ class ModernActivity : ComponentActivity() {
                         refreshSoon()
                     },
                     onBenchmark = {
+                        if (ui.running) {
+                            toast("Stop mining before benchmark.")
+                            return@BtcrigScreen
+                        }
                         benchmarking = true
-                        benchmark = "Benchmark: running"
+                        val configPath = runCatching { BtcrigConfig.ensure(this).absolutePath }.getOrDefault("")
                         val threads = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
                         Thread {
-                            val hps = BtcrigNative.benchmarkCpu(2, threads)
+                            val lines = mutableListOf("Benchmark", "CPU full cores: $threads", "")
+                            for (backend in CPU_BACKENDS) {
+                                runOnUiThread {
+                                    benchmark = (lines + "$backend: testing...").joinToString("\n")
+                                }
+                                val hps = BtcrigNative.benchmarkCpuBackend(backend, 1, threads)
+                                lines.add("$backend: ${if (hps >= 0.0) formatHashrate(hps) else "unavailable"}")
+                            }
+                            runOnUiThread {
+                                benchmark = (lines + "opencl: testing...").joinToString("\n")
+                            }
+                            val openclHps = BtcrigNative.benchmarkOpencl(configPath, 1)
+                            lines.add("opencl: ${if (openclHps >= 0.0) formatHashrate(openclHps) else "unavailable"}")
                             runOnUiThread {
                                 benchmarking = false
-                                benchmark = "Benchmark: ${formatHashrate(hps)} / $threads threads"
+                                benchmark = lines.joinToString("\n")
                             }
                         }.start()
                     },
                     basic = basic,
-                    onBasicChange = { basic = it },
-                    onSaveBasic = {
-                        runCatching { BtcrigConfig.writeBasic(this, it) }
-                            .onSuccess {
-                                basic = readBasic()
-                                ui = readUi()
-                                toast("Config saved.")
-                            }
-                            .onFailure { error -> toast("Save failed: ${error.message}") }
-                    },
+                    onBasicChange = { saveBasic(it) },
                     onJson = { showJson = true },
                     onLog = { showLog = true },
                 )
@@ -285,20 +308,62 @@ private data class UiState(
     val logPath: String,
 )
 
+private val Ink = Color(0xFF172033)
+private val Muted = Color(0xFF6E7890)
+private val Accent = Color(0xFF26364F)
+private val RigBlue = Color(0xFF4C6F9F)
+private val SoftBlue = Color(0xFFE8EDF8)
+private val CardFill = Color(0xFFEFF1F7)
+private val FieldFill = Color.Transparent
+private val CPU_BACKENDS = listOf("openssl", "fast-c", "arm-sha2", "x86-sha-ni")
+private val DONATION_LEVELS = listOf(0, 1, 3, 5, 99)
+
 @Composable
 private fun BtcrigTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = lightColorScheme(
-            primary = Color(0xFF4C6FFF),
-            secondary = Color(0xFF667085),
+            primary = Accent,
+            secondary = Muted,
             surface = Color.White,
             background = Color(0xFFF5F7FB),
             onPrimary = Color.White,
-            onSurface = Color(0xFF18202E),
-            onBackground = Color(0xFF18202E),
+            onSurface = Ink,
+            onBackground = Ink,
         ),
         content = content,
     )
+}
+
+@Preview(name = "Home", showBackground = true, widthDp = 390, heightDp = 844)
+@Composable
+private fun HomePreview() = PreviewScreen(0)
+
+@Preview(name = "Settings", showBackground = true, widthDp = 390, heightDp = 844)
+@Composable
+private fun SettingsPreview() = PreviewScreen(1)
+
+@Preview(name = "Info", showBackground = true, widthDp = 390, heightDp = 844)
+@Composable
+private fun InfoPreview() = PreviewScreen(2)
+
+@Composable
+private fun PreviewScreen(page: Int) {
+    BtcrigTheme {
+        BtcrigScreen(
+            ui = previewUi(),
+            page = page,
+            benchmark = defaultBenchmarkText(),
+            benchmarking = false,
+            onPage = {},
+            onStart = {},
+            onStop = {},
+            onBenchmark = {},
+            basic = previewBasic(),
+            onBasicChange = {},
+            onJson = {},
+            onLog = {},
+        )
+    }
 }
 
 @Composable
@@ -313,7 +378,6 @@ private fun BtcrigScreen(
     onBenchmark: () -> Unit,
     basic: BtcrigConfig.Basic,
     onBasicChange: (BtcrigConfig.Basic) -> Unit,
-    onSaveBasic: (BtcrigConfig.Basic) -> Unit,
     onJson: () -> Unit,
     onLog: () -> Unit,
 ) {
@@ -328,27 +392,37 @@ private fun BtcrigScreen(
                 .padding(padding),
             color = MaterialTheme.colorScheme.background,
         ) {
-            Column(
+            Box(
                 modifier = Modifier
-                    .verticalScroll(rememberScrollState())
-                    .padding(24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                    .fillMaxSize()
+                    .padding(start = 24.dp, end = 24.dp, top = 24.dp)
             ) {
                 Crossfade(targetState = page, animationSpec = tween(220), label = "page") { currentPage ->
-                    Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                        when (currentPage) {
-                            1 -> {
-                                Text("BTCRig", fontSize = 42.sp, fontWeight = FontWeight.Bold)
-                                Text("Android miner shell · CPU / OpenCL", color = MaterialTheme.colorScheme.secondary)
-                                SettingsPage(ui, basic, onBasicChange, onSaveBasic, onJson)
+                    when (currentPage) {
+                        1 -> {
+                            Column(
+                                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.spacedBy(16.dp),
+                            ) {
+                                PageHeader()
+                                SettingsPage(ui, basic, onBasicChange, onJson)
                             }
-                            2 -> {
-                                Text("BTCRig", fontSize = 42.sp, fontWeight = FontWeight.Bold)
-                                Text("Android miner shell · CPU / OpenCL", color = MaterialTheme.colorScheme.secondary)
-                                InfoPage(ui, benchmark, benchmarking, onBenchmark, onLog)
-                            }
-                            else -> HomePage(ui, onStart, onStop)
                         }
+                        2 -> {
+                            Column(
+                                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.spacedBy(16.dp),
+                            ) {
+                                PageHeader()
+                                InfoPage(ui, benchmark, benchmarking, onBenchmark, onLog, basic, onBasicChange)
+                            }
+                        }
+                        else -> HomePage(
+                            ui = ui,
+                            onStart = onStart,
+                            onStop = onStop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
                     }
                 }
             }
@@ -358,30 +432,46 @@ private fun BtcrigScreen(
 
 @Composable
 private fun BottomNav(page: Int, onPage: (Int) -> Unit) {
-    Surface(color = MaterialTheme.colorScheme.surface) {
-        Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 12.dp)) {
-            listOf("首页", "设置", "信息").forEachIndexed { index, title ->
-                Column(
-                    modifier = Modifier
-                        .weight(1f)
-                        .clip(RoundedCornerShape(18.dp))
-                        .clickable { onPage(index) }
-                        .padding(vertical = 8.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Box(
+    Surface(
+        color = MaterialTheme.colorScheme.surface,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(0.5.dp)
+                    .background(Color(0xFFE2E5EC))
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 24.dp, vertical = 12.dp)
+            ) {
+                listOf("首页", "设置", "信息").forEachIndexed { index, title ->
+                    Column(
                         modifier = Modifier
-                            .width(52.dp)
-                            .height(8.dp)
-                            .clip(RoundedCornerShape(999.dp))
-                            .background(if (page == index) Color(0xFF0B2D5F) else Color.Transparent),
-                    )
-                    Text(
-                        title,
-                        color = if (page == index) Color(0xFF0B2D5F) else MaterialTheme.colorScheme.secondary,
-                        fontWeight = if (page == index) FontWeight.Bold else FontWeight.Normal,
-                    )
+                            .weight(1f)
+                            .clip(RoundedCornerShape(18.dp))
+                            .clickable { onPage(index) }
+                            .padding(vertical = 8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(52.dp)
+                                .height(8.dp)
+                                .clip(RoundedCornerShape(999.dp))
+                                .background(if (page == index) Accent else Color.Transparent),
+                        )
+                        Text(
+                            title,
+                            color = if (page == index) Accent else MaterialTheme.colorScheme.secondary,
+                            fontWeight = if (page == index) FontWeight.Bold else FontWeight.Normal,
+                        )
+                    }
                 }
             }
         }
@@ -393,43 +483,105 @@ private fun HomePage(
     ui: UiState,
     onStart: () -> Unit,
     onStop: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(24.dp),
-    ) {
-        EnterUp(delayMillis = 0) {
-            Box(
-                modifier = Modifier.fillMaxWidth(),
-                contentAlignment = Alignment.Center,
-            ) {
-                HeroGlow(ui.running)
-                Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(18.dp)) {
-                    Box(modifier = Modifier.height(74.dp))
-                    HashrateText(ui.hashrate)
-                    Text("BTCRig v${ui.version}", color = MaterialTheme.colorScheme.secondary)
+    Box(modifier = modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(24.dp),
+        ) {
+            EnterUp(delayMillis = 0) {
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    HeroGlow(ui.running)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                        Box(modifier = Modifier.height(74.dp))
+                        HashrateText(ui.hashrate)
+                    }
+                }
+            }
+            EnterUp(delayMillis = 180) {
+                StatusPill(
+                    running = ui.running,
+                    text = if (ui.running) "运行中" else "已停止",
+                    onClick = { if (ui.running) onStop() else onStart() },
+                )
+            }
+            EnterUp(delayMillis = 320) {
+                Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SpecRow("CPU", ui.cpuSummary)
+                    SpecRow("GPU", ui.gpuSummary)
+                    SpecRow("矿池", ui.pool)
+                }
+            }
+            if (ui.error != "none") {
+                AppCard("Last error") { Line(ui.error) }
+            }
+        }
+        Box(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
+            EnterUp(delayMillis = 420) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    contentAlignment = Alignment.BottomCenter,
+                ) {
+                    BrandHeader(ui.version)
                 }
             }
         }
-        EnterUp(delayMillis = 180) {
-            StatusPill(
-                running = ui.running,
-                text = if (ui.running) "运行中" else "已停止",
-                onClick = { if (ui.running) onStop() else onStart() },
-            )
-        }
-        EnterUp(delayMillis = 320) {
-            Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                SpecRow("CPU", ui.cpuSummary)
-                SpecRow("GPU", ui.gpuSummary)
-                SpecRow("矿池", ui.pool)
-            }
-        }
-        if (ui.error != "none") {
-            AppCard("Last error") { Line(ui.error) }
-        }
     }
+}
+
+@Composable
+private fun PageHeader() {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        BrandTitle(42)
+        Text("Android miner shell · CPU / OpenCL", color = MaterialTheme.colorScheme.secondary)
+    }
+}
+
+@Composable
+private fun BrandHeader(version: String) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "↗",
+                modifier = Modifier.graphicsLayer { alpha = 0f },
+                color = Accent,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+            )
+            Text("v$version", color = MaterialTheme.colorScheme.secondary, fontSize = 13.sp)
+            UpdateBadge()
+        }
+        BrandTitle(18)
+    }
+}
+
+@Composable
+private fun BrandTitle(size: Int) {
+    Text(
+        buildAnnotatedString {
+            withStyle(SpanStyle(color = Ink)) { append("BTC") }
+            withStyle(SpanStyle(color = RigBlue)) { append("Rig") }
+        },
+        fontSize = size.sp,
+        fontWeight = FontWeight.ExtraBold,
+    )
+}
+
+@Composable
+private fun UpdateBadge() {
+    Text(
+        "↗",
+        color = Accent,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Bold,
+    )
 }
 
 @Composable
@@ -499,7 +651,7 @@ private fun HeroGlow(running: Boolean) {
             .background(
                 Brush.radialGradient(
                     listOf(
-                        if (running) Color(0x3318A058) else Color(0x334C6FFF),
+                        if (running) Color(0x3318A058) else Color(0x3326364F),
                         Color.Transparent,
                     ),
                 ),
@@ -522,11 +674,11 @@ private fun StatusPill(running: Boolean, text: String, onClick: () -> Unit) {
         animationSpec = infiniteRepeatable(animation = tween(900), repeatMode = RepeatMode.Reverse),
         label = "status-scale",
     )
-    val color = if (running) Color(0xFF18A058) else Color(0xFF0B2D5F)
+    val color = if (running) Color(0xFF18A058) else Accent
     Row(
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))
-            .background(if (running) Color(0xFFDFF8E9) else Color(0xFFE5ECFF))
+            .background(if (running) Color(0xFFDFF8E9) else SoftBlue)
             .clickable(onClick = onClick)
             .padding(horizontal = 24.dp, vertical = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
@@ -573,11 +725,10 @@ private fun SettingsPage(
     ui: UiState,
     basic: BtcrigConfig.Basic,
     onBasicChange: (BtcrigConfig.Basic) -> Unit,
-    onSaveBasic: (BtcrigConfig.Basic) -> Unit,
     onJson: () -> Unit,
 ) {
     val enabled = !ui.running
-    AppCard("设置") {
+    SettingSection("设置", compact = true) {
         SettingField(
             value = basic.poolUrl,
             onValueChange = { onBasicChange(basic.copyBasic(poolUrl = it)) },
@@ -606,15 +757,26 @@ private fun SettingsPage(
         SettingSwitchRow("启用 OpenCL / GPU", basic.openclEnabled, enabled) {
             onBasicChange(basic.copyBasic(openclEnabled = it))
         }
+        SettingSwitchRow("兼容未知证书", basic.certCompat, enabled) {
+            onBasicChange(basic.copyBasic(certCompat = it))
+        }
         if (!enabled) {
             Line("停止服务后才能保存设置")
         }
-        Button(onClick = { onSaveBasic(basic) }, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
-            Text("保存设置")
-        }
-        OutlinedButton(onClick = onJson, enabled = enabled, modifier = Modifier.fillMaxWidth()) {
-            Text("高级 JSON")
-        }
+    }
+    RigButton(text = "高级 JSON", onClick = onJson, enabled = enabled)
+}
+
+@Composable
+private fun SettingSection(title: String, compact: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(
+            title,
+            color = RigBlue,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+        )
+        SoftCard(compact, content)
     }
 }
 
@@ -626,30 +788,23 @@ private fun SettingField(
     enabled: Boolean,
     helper: String = "",
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        TextField(
+    Column(modifier = Modifier.padding(vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+        Text(label, color = MaterialTheme.colorScheme.secondary, fontSize = 15.sp, lineHeight = 20.sp)
+        BasicTextField(
             value = value,
             onValueChange = onValueChange,
-            label = { Text(label) },
             singleLine = true,
             enabled = enabled,
             modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(18.dp),
-            colors = TextFieldDefaults.colors(
-                focusedContainerColor = Color(0xFFF6F7FC),
-                unfocusedContainerColor = Color(0xFFF6F7FC),
-                disabledContainerColor = Color(0xFFF6F7FC),
-                focusedIndicatorColor = Color.Transparent,
-                unfocusedIndicatorColor = Color.Transparent,
-                disabledIndicatorColor = Color.Transparent,
-            ),
+            textStyle = TextStyle(fontSize = 14.sp, lineHeight = 18.sp, color = Ink),
         )
         if (helper.isNotBlank()) {
             Text(
                 helper,
-                modifier = Modifier.padding(start = 16.dp),
+                modifier = Modifier.padding(top = 1.dp),
                 color = MaterialTheme.colorScheme.secondary,
                 fontSize = 12.sp,
+                lineHeight = 16.sp,
             )
         }
     }
@@ -665,15 +820,23 @@ private fun SettingSwitchRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xFFF6F7FC))
             .clickable(enabled = enabled) { onCheckedChange(!checked) }
-            .padding(horizontal = 18.dp, vertical = 12.dp),
+            .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Text(title, modifier = Modifier.weight(1f), fontSize = 16.sp, lineHeight = 22.sp)
-        Switch(checked = checked, onCheckedChange = if (enabled) onCheckedChange else null, enabled = enabled)
+        Text(title, modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.secondary, fontSize = 15.sp, lineHeight = 20.sp)
+        Switch(
+            checked = checked,
+            onCheckedChange = if (enabled) onCheckedChange else null,
+            enabled = enabled,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Accent,
+                uncheckedThumbColor = Muted,
+                uncheckedTrackColor = Color(0xFFE2E5EC),
+            ),
+        )
     }
 }
 
@@ -684,19 +847,115 @@ private fun InfoPage(
     benchmarking: Boolean,
     onBenchmark: () -> Unit,
     onLog: () -> Unit,
+    basic: BtcrigConfig.Basic,
+    onBasicChange: (BtcrigConfig.Basic) -> Unit,
 ) {
-    OutlinedButton(onClick = onBenchmark, enabled = !benchmarking, modifier = Modifier.fillMaxWidth()) {
-        Text("CPU benchmark")
-    }
-    if (benchmark.isNotBlank()) {
-        AppCard("Benchmark") { Line(benchmark) }
-    }
-    OutlinedButton(onClick = onLog, modifier = Modifier.fillMaxWidth()) { Text("View log") }
-    AppCard("Info") {
+    Text("信息", color = RigBlue, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+    RigButton(
+        text = if (benchmarking) "Benchmarking..." else "Benchmark CPU",
+        onClick = onBenchmark,
+        enabled = !benchmarking && !ui.running
+    )
+    BenchmarkBox(benchmark)
+    RigButton(text = "View log", onClick = onLog)
+    SoftCard(compact = true) {
         Line("Backend: ${ui.backend}")
         Line("Self-test: ${if (ui.selfTest) "ok" else "failed"}")
         Line("OpenCL:\n${ui.opencl}")
         Line("Config: ${ui.configPath}\nLog: ${ui.logPath}")
+    }
+    DonationCard(
+        percent = basic.donationPercent,
+        enabled = !ui.running,
+        onChange = { onBasicChange(basic.copyBasic(donationPercent = it)) },
+    )
+}
+
+@Composable
+private fun DonationCard(percent: Int, enabled: Boolean, onChange: (Int) -> Unit) {
+    val index = DONATION_LEVELS.indexOf(percent).takeIf { it >= 0 } ?: DONATION_LEVELS.indexOf(1)
+    SettingSection("支持作者", compact = true) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Text("捐赠比例", modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.secondary, fontSize = 15.sp)
+            Text("${DONATION_LEVELS[index]}%", color = RigBlue, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+        }
+        Slider(
+            value = index.toFloat(),
+            onValueChange = { onChange(DONATION_LEVELS[it.toInt().coerceIn(0, DONATION_LEVELS.lastIndex)]) },
+            enabled = enabled,
+            modifier = Modifier.fillMaxWidth().height(32.dp),
+            valueRange = 0f..DONATION_LEVELS.lastIndex.toFloat(),
+            steps = DONATION_LEVELS.size - 2,
+            colors = SliderDefaults.colors(
+                thumbColor = RigBlue,
+                activeTrackColor = RigBlue,
+                inactiveTrackColor = SoftBlue,
+                activeTickColor = Color.Transparent,
+                inactiveTickColor = RigBlue,
+            ),
+        )
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            DONATION_LEVELS.forEach { level ->
+                Text("$level%", color = Muted, fontSize = 12.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun BenchmarkBox(text: String) {
+    SoftCard(compact = true) {
+        Text(
+            text,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(150.dp)
+                .verticalScroll(rememberScrollState()),
+            color = MaterialTheme.colorScheme.secondary,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 14.sp,
+            lineHeight = 18.sp,
+        )
+    }
+}
+
+@Composable
+private fun RigButton(
+    text: String,
+    onClick: () -> Unit,
+    enabled: Boolean = true,
+) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        shape = RoundedCornerShape(12.dp),
+        color = if (enabled) Color.White else Color(0xFFE2E5EC),
+        border = if (enabled) androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2E5EC)) else null,
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
+            color = if (enabled) RigBlue else Muted,
+            fontWeight = FontWeight.Bold,
+            fontSize = 14.sp
+        )
+    }
+}
+
+@Composable
+private fun SoftCard(compact: Boolean = false, content: @Composable ColumnScope.() -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = CardFill),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        shape = RoundedCornerShape(22.dp),
+    ) {
+        Column(
+            modifier = Modifier.padding(if (compact) 14.dp else 20.dp),
+            verticalArrangement = Arrangement.spacedBy(if (compact) 7.dp else 12.dp),
+        ) {
+            content()
+        }
     }
 }
 
@@ -704,7 +963,7 @@ private fun InfoPage(
 private fun AppCard(title: String, content: @Composable ColumnScope.() -> Unit) {
     Card(
         modifier = Modifier.fillMaxWidth(),
-        colors = CardDefaults.cardColors(containerColor = Color(0xFFF0F2F8)),
+        colors = CardDefaults.cardColors(containerColor = CardFill),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         shape = RoundedCornerShape(22.dp),
     ) {
@@ -717,7 +976,7 @@ private fun AppCard(title: String, content: @Composable ColumnScope.() -> Unit) 
 
 @Composable
 private fun Line(text: String) {
-    Text(text, color = MaterialTheme.colorScheme.secondary, lineHeight = 22.sp)
+    Text(text, color = MaterialTheme.colorScheme.secondary, fontSize = 14.sp, lineHeight = 18.sp)
 }
 
 @Composable
@@ -803,12 +1062,45 @@ private fun gpuSummary(opencl: String): String {
     return api.ifBlank { name }.ifBlank { device }
 }
 
+private fun previewUi() = UiState(
+    version = "0.1.0",
+    backend = "arm-sha2",
+    selfTest = true,
+    running = true,
+    service = "running",
+    hashrate = "141.30 MH/s",
+    workers = "Workers: 8",
+    total = "Total: 123456789",
+    pool = "stratum+tcp://public-pool.io:3333",
+    stratum = "Stratum: authorized / connected: yes / jobs: 8",
+    shares = "Shares: 3 submit / 3 ok / 0 reject",
+    error = "none",
+    opencl = "Config: enabled\nRuntime: available\n#0 / Qualcomm / Adreno(TM) 750 / OpenCL 3.0",
+    cpuSummary = "QTI SM8650 · 8 cores · arm64-v8a",
+    gpuSummary = "OpenCL 3.0 Adreno(TM) 750",
+    configSummary = "CPU: 8 threads / OpenCL: enabled",
+    configPath = "/data/user/0/com.btcrig.android/files/config.json",
+    logPath = "/data/user/0/com.btcrig.android/files/btcrig.log",
+)
+
+private fun previewBasic() = BtcrigConfig.Basic().apply {
+    poolUrl = "stratum+tcp://public-pool.io:3333"
+    user = "bc1qqz0wutk9kk5mmaf7fu4dm5w4fq4fhaah9hpzr3"
+    pass = "x"
+    cpuThreads = 8
+    openclEnabled = true
+    certCompat = true
+    donationPercent = 1
+}
+
 private fun BtcrigConfig.Basic.copyBasic(
     poolUrl: String = this.poolUrl,
     user: String = this.user,
     pass: String = this.pass,
     cpuThreads: Int = this.cpuThreads,
     openclEnabled: Boolean = this.openclEnabled,
+    certCompat: Boolean = this.certCompat,
+    donationPercent: Int = this.donationPercent,
 ): BtcrigConfig.Basic {
     val next = BtcrigConfig.Basic()
     next.poolUrl = poolUrl
@@ -816,8 +1108,13 @@ private fun BtcrigConfig.Basic.copyBasic(
     next.pass = pass
     next.cpuThreads = cpuThreads.coerceAtLeast(0)
     next.openclEnabled = openclEnabled
+    next.certCompat = certCompat
+    next.donationPercent = DONATION_LEVELS.find { it == donationPercent } ?: 1
     return next
 }
+
+private fun defaultBenchmarkText(): String =
+    (listOf("Benchmark", "CPU full cores: --", "") + CPU_BACKENDS.map { "$it: --" } + "opencl: --").joinToString("\n")
 
 private fun formatHashrate(hps: Double): String = when {
     hps >= 1_000_000_000.0 -> String.format(Locale.US, "%.2f GH/s", hps / 1_000_000_000.0)

@@ -203,16 +203,21 @@ static void update_stats(void *opaque, const stratum_snapshot_t *snapshot) {
         g_stats.last_hashes = 0;
     }
 
-    if (g_stats.last_time > 0.0 && snapshot->now > g_stats.last_time && snapshot->hashes >= g_stats.last_hashes) {
+    if (g_stats.last_time <= 0.0) {
+        g_stats.last_time = snapshot->now;
+        g_stats.last_hashes = snapshot->hashes;
+    } else if (snapshot->hashes > g_stats.last_hashes && snapshot->now > g_stats.last_time) {
         g_stats.hashrate = (double)(snapshot->hashes - g_stats.last_hashes) / (snapshot->now - g_stats.last_time);
+        g_stats.last_time = snapshot->now;
+        g_stats.last_hashes = snapshot->hashes;
+    } else if (snapshot->now - g_stats.last_time > 30.0) {
+        g_stats.hashrate = 0.0;
     }
     g_stats.conn_hashes = snapshot->hashes;
     g_stats.conn_jobs = snapshot->jobs;
     g_stats.conn_submits = snapshot->submits;
     g_stats.conn_accepts = snapshot->accepts;
     g_stats.conn_rejects = snapshot->rejects;
-    g_stats.last_time = snapshot->now;
-    g_stats.last_hashes = snapshot->hashes;
     g_stats.hashes = g_stats.base_hashes + g_stats.conn_hashes;
     g_stats.worker_count = snapshot->worker_count;
     g_stats.connected = snapshot->connected && snapshot->authorized;

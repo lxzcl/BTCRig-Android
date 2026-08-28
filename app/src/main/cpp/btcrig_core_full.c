@@ -336,6 +336,7 @@ static core_config_t read_config(const char *path) {
     config.retry_pause = 2;
     config.tls_compat = 1;
     config.donation_percent = 1;
+    config.difficulty = 0.1;
     config.stats_interval = 10.0;
     miner_opencl_config_defaults(&config.opencl);
     config.opencl.enabled = 1;

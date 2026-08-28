@@ -24,6 +24,7 @@ final class BtcrigConfig {
         String user = DEFAULT_USER;
         String pass = "x";
         int cpuThreads = defaultCpuThreads();
+        double difficulty = 0.1;
         boolean openclEnabled = true;
         boolean certCompat = true;
         int donationPercent = 1;
@@ -97,10 +98,12 @@ final class BtcrigConfig {
             basic.poolUrl = pool.optString("url", basic.poolUrl);
             basic.user = pool.optString("user", basic.user);
             basic.pass = pool.optString("pass", basic.pass);
+            basic.difficulty = pool.optDouble("diff", pool.optDouble("difficulty", basic.difficulty));
         } else {
             basic.poolUrl = root.optString("pool", basic.poolUrl);
             basic.user = root.optString("user", basic.user);
             basic.pass = root.optString("pass", basic.pass);
+            basic.difficulty = root.optDouble("diff", root.optDouble("difficulty", basic.difficulty));
         }
         return basic;
     }
@@ -168,6 +171,7 @@ final class BtcrigConfig {
         pool.put("url", poolUrl);
         pool.put("user", user);
         pool.put("pass", basic.pass.isEmpty() ? "x" : basic.pass);
+        pool.put("diff", Math.max(0.0, basic.difficulty));
         write(context, root.toString(2));
     }
 
@@ -243,6 +247,13 @@ final class BtcrigConfig {
             }
             if (!root.has("donate-level")) {
                 root.put("donate-level", donationPercent);
+                changed = true;
+            }
+
+            JSONArray pools = root.optJSONArray("pools");
+            JSONObject pool = pools != null && pools.length() > 0 ? pools.optJSONObject(0) : null;
+            if (pool != null && !pool.has("diff") && !pool.has("difficulty")) {
+                pool.put("diff", 0.1);
                 changed = true;
             }
 

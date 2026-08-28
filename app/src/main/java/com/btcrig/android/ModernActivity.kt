@@ -769,6 +769,13 @@ private fun SettingsPage(
             enabled = enabled,
             helper = "0 = 不使用 CPU 挖矿",
         )
+        SettingField(
+            value = basic.difficulty.toString(),
+            onValueChange = { onBasicChange(basic.copyBasic(difficulty = it.toDoubleOrNull() ?: 0.0)) },
+            label = "难度",
+            enabled = enabled,
+            helper = "0 = 不指定矿池难度",
+        )
         SettingSwitchRow("启用 OpenCL / GPU", basic.openclEnabled, enabled) {
             onBasicChange(basic.copyBasic(openclEnabled = it))
         }
@@ -1113,6 +1120,7 @@ private fun BtcrigConfig.Basic.copyBasic(
     user: String = this.user,
     pass: String = this.pass,
     cpuThreads: Int = this.cpuThreads,
+    difficulty: Double = this.difficulty,
     openclEnabled: Boolean = this.openclEnabled,
     certCompat: Boolean = this.certCompat,
     donationPercent: Int = this.donationPercent,
@@ -1122,6 +1130,7 @@ private fun BtcrigConfig.Basic.copyBasic(
     next.user = user
     next.pass = pass
     next.cpuThreads = cpuThreads.coerceAtLeast(0)
+    next.difficulty = difficulty.coerceAtLeast(0.0)
     next.openclEnabled = openclEnabled
     next.certCompat = certCompat
     next.donationPercent = DONATION_LEVELS.find { it == donationPercent } ?: 1

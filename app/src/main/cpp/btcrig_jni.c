@@ -1,8 +1,16 @@
 #include "btcrig_core.h"
+#include "btcrig_android_tls.h"
 
 #include <jni.h>
 
 typedef void (*copy_string_fn)(char *, size_t);
+
+#if defined(__ANDROID__)
+JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
+    (void)reserved;
+    return btcrig_android_tls_onload(vm) == 0 ? JNI_VERSION_1_6 : JNI_ERR;
+}
+#endif
 
 static jstring new_core_string(JNIEnv *env, copy_string_fn copy) {
     char text[256];

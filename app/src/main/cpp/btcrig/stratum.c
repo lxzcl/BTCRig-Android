@@ -3,6 +3,7 @@
 #include "stratum.h"
 
 #include "btcrig_android_stop.h"
+#include "btcrig_android_tls.h"
 #include "btcrig_version.h"
 #include "console.h"
 #include "miner.h"
@@ -42,6 +43,9 @@ typedef struct {
 typedef struct {
     int fd;
     int use_tls;
+#if defined(__ANDROID__)
+    int android_tls_id;
+#endif
     SSL_CTX *ctx;
     SSL *ssl;
 } stratum_conn_t;
@@ -257,6 +261,12 @@ static void conn_close(stratum_conn_t *conn) {
         SSL_free(conn->ssl);
         conn->ssl = NULL;
     }
+#if defined(__ANDROID__)
+    if (conn->android_tls_id >= 0) {
+        btcrig_android_tls_close(conn->android_tls_id);
+        conn->android_tls_id = -1;
+    }
+#endif
     if (conn->ctx != NULL) {
         SSL_CTX_free(conn->ctx);
         conn->ctx = NULL;
@@ -279,6 +289,36 @@ static int conn_open_once(stratum_conn_t *conn,
     memset(conn, 0, sizeof(*conn));
     conn->fd = -1;
     conn->use_tls = endpoint->use_tls;
+#if defined(__ANDROID__)
+    conn->android_tls_id = -1;
+#endif
+
+#if defined(__ANDROID__)
+    if (endpoint->use_tls) {
+        char tls_error[256];
+        char cipher[128];
+        conn->android_tls_id = btcrig_android_tls_open(endpoint->host, endpoint->port, verify_tls);
+        if (conn->android_tls_id < 0) {
+            if (tls_handshake_failed != NULL) {
+                *tls_handshake_failed = 1;
+            }
+            btcrig_android_tls_last_error(tls_error, sizeof(tls_error));
+            fprintf(stderr, "%s[TLS]%s Android TLS connect failed: %s\n",
+                    C_BRIGHT_RED, C_RESET, tls_error[0] != '\0' ? tls_error : "unknown");
+            conn_close(conn);
+            return -1;
+        }
+        btcrig_android_tls_cipher(conn->android_tls_id, cipher, sizeof(cipher));
+        printf("%s[TLS]%s %shandshake ok%s verify=%s%s%s cipher=%s\n",
+               C_CYAN, C_RESET,
+               C_BRIGHT_GREEN, C_RESET,
+               verify_tls ? C_BRIGHT_GREEN : C_YELLOW,
+               verify_tls ? "on" : "off",
+               C_RESET,
+               cipher[0] != '\0' ? cipher : "unknown");
+        return 0;
+    }
+#endif
 
     conn->fd = connect_tcp(endpoint);
     if (conn->fd < 0) {
@@ -356,15 +396,6 @@ static int conn_open(stratum_conn_t *conn, const pool_endpoint_t *endpoint, int 
         }
     }
 
-    if (endpoint->use_tls) {
-        pool_endpoint_t plain = *endpoint;
-        plain.use_tls = 0;
-        plain.verify_tls = 0;
-        fprintf(stderr,
-                "%s[TLS]%s TLS unavailable, retrying same endpoint as plain TCP\n",
-                C_YELLOW, C_RESET);
-        return conn_open_once(conn, &plain, 0, NULL);
-    }
     return -1;
 }
 
@@ -374,6 +405,18 @@ static int conn_write(stratum_conn_t *conn, const char *data, size_t len) {
     }
 
     if (conn->use_tls) {
+#if defined(__ANDROID__)
+        while (len > 0) {
+            size_t chunk = len > 16384 ? 16384 : len;
+            int n = btcrig_android_tls_write(conn->android_tls_id, data, chunk);
+            if (n <= 0) {
+                return -1;
+            }
+            data += n;
+            len -= (size_t)n;
+        }
+        return 0;
+#else
         while (len > 0) {
             int n = SSL_write(conn->ssl, data, (int)len);
             if (n <= 0) {
@@ -387,6 +430,7 @@ static int conn_write(stratum_conn_t *conn, const char *data, size_t len) {
             len -= (size_t)n;
         }
         return 0;
+#endif
     }
 
     while (len > 0) {
@@ -409,6 +453,9 @@ static int conn_read(stratum_conn_t *conn, char *data, size_t len) {
     }
 
     if (conn->use_tls) {
+#if defined(__ANDROID__)
+        return btcrig_android_tls_read(conn->android_tls_id, data, len);
+#else
         int n = SSL_read(conn->ssl, data, (int)len);
         if (n <= 0) {
             int err = SSL_get_error(conn->ssl, n);
@@ -421,6 +468,7 @@ static int conn_read(stratum_conn_t *conn, char *data, size_t len) {
             return -1;
         }
         return n;
+#endif
     }
 
     int n = recv(conn->fd, data, (int)len, 0);
@@ -437,7 +485,38 @@ static int conn_read(stratum_conn_t *conn, char *data, size_t len) {
 }
 
 static int conn_pending(stratum_conn_t *conn) {
+#if defined(__ANDROID__)
+    return conn != NULL && conn->use_tls && conn->android_tls_id >= 0 ? btcrig_android_tls_pending(conn->android_tls_id) : 0;
+#else
     return conn != NULL && conn->use_tls && conn->ssl != NULL ? SSL_pending(conn->ssl) : 0;
+#endif
+}
+
+static int conn_wait_read(stratum_conn_t *conn, int timeout_ms) {
+#if defined(__ANDROID__)
+    if (conn != NULL && conn->use_tls && conn->android_tls_id >= 0) {
+        return 1;
+    }
+#endif
+    fd_set readfds;
+    FD_ZERO(&readfds);
+    FD_SET(conn->fd, &readfds);
+
+    struct timeval tv;
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+
+    int ready = select(conn->fd + 1, &readfds, NULL, NULL, &tv);
+    if (ready == 0) {
+        return -3;
+    }
+    if (ready < 0) {
+        if (errno == EINTR) {
+            return -3;
+        }
+        return -1;
+    }
+    return 1;
 }
 
 static int send_request(stratum_conn_t *conn, int id, const char *method, json_t *params) {
@@ -865,22 +944,11 @@ static int read_line(line_reader_t *reader, char *out, size_t out_size, int time
         }
 
         if (conn_pending(reader->conn) <= 0) {
-            fd_set readfds;
-            FD_ZERO(&readfds);
-            FD_SET(reader->conn->fd, &readfds);
-
-            struct timeval tv;
-            tv.tv_sec = timeout_ms / 1000;
-            tv.tv_usec = (timeout_ms % 1000) * 1000;
-
-            int ready = select(reader->conn->fd + 1, &readfds, NULL, NULL, &tv);
-            if (ready == 0) {
+            int ready = conn_wait_read(reader->conn, timeout_ms);
+            if (ready == -3) {
                 return -3;
             }
             if (ready < 0) {
-                if (errno == EINTR) {
-                    continue;
-                }
                 return -1;
             }
         }

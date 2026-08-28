@@ -3,6 +3,7 @@ project(btcrig_core C)
 
 set(BTCRIG_SRC
     btcrig_core_full.c
+    btcrig_android_tls.c
     btcrig_jni.c
     compat/openssl_sha.c
     btcrig/console.c
@@ -45,6 +46,7 @@ target_compile_definitions(btcrig_core PRIVATE
     HAVE_CONFIG_H
 )
 target_include_directories(btcrig_core PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/compat
     ${CMAKE_CURRENT_SOURCE_DIR}/btcrig
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/jansson/src

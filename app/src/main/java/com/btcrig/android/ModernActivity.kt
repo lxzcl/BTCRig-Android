@@ -100,6 +100,7 @@ class ModernActivity : ComponentActivity() {
             fun saveBasic(next: BtcrigConfig.Basic) {
                 basic = next
                 runCatching { BtcrigConfig.writeBasic(this, next) }
+                    .onSuccess { ui = readUi() }
                     .onFailure { error -> toast("Save failed: ${error.message}") }
             }
             fun refreshSoon() {

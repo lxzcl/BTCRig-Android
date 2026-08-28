@@ -8,6 +8,12 @@ android {
     compileSdk = 36
     ndkVersion = "29.0.14206865"
 
+    def signingFile = System.getenv("ANDROID_KEYSTORE_FILE")
+    def hasBtcrigSigning = signingFile &&
+        System.getenv("ANDROID_KEYSTORE_PASSWORD") &&
+        System.getenv("ANDROID_KEY_ALIAS") &&
+        System.getenv("ANDROID_KEY_PASSWORD")
+
     defaultConfig {
         applicationId = "com.btcrig.android"
         minSdk = 21
@@ -21,6 +27,30 @@ android {
         }
         ndk {
             abiFilters "arm64-v8a", "armeabi-v7a"
+        }
+    }
+
+    signingConfigs {
+        if (hasBtcrigSigning) {
+            btcrig {
+                storeFile = file(signingFile)
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
+    buildTypes {
+        debug {
+            if (hasBtcrigSigning) {
+                signingConfig = signingConfigs.btcrig
+            }
+        }
+        release {
+            if (hasBtcrigSigning) {
+                signingConfig = signingConfigs.btcrig
+            }
         }
     }
 

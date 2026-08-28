@@ -30,11 +30,19 @@ jobs:
           yes | sdkmanager --licenses >/dev/null
           sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;29.0.14206865" "cmake;3.22.1"
 
-      - name: Build debug APK
-        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+      - name: Decode signing key
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$RUNNER_TEMP/btcrig-android.jks"
 
-      - name: Upload debug APK
+      - name: Build signed APKs
+        env:
+          ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/btcrig-android.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew :app:assembleDebug :app:assembleRelease --no-daemon --stacktrace
+
+      - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
-          name: BTCRig-Android-debug
-          path: app/build/outputs/apk/debug/*.apk
+          name: BTCRig-Android-apks
+          path: app/build/outputs/apk/**/*.apk

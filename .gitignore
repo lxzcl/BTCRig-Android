@@ -7,3 +7,5 @@ app/build/
 app/.cxx/
 *.apk
 *.zip
+*.jks
+*.keystore

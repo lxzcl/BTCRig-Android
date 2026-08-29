@@ -262,8 +262,10 @@ class ModernActivity : ComponentActivity() {
         runCatching {
             startService(Intent(this, BtcrigService::class.java).setAction(BtcrigService.ACTION_STOP))
         }.onFailure { error ->
-            runCatching { BtcrigNative.stop() }
-            stopService(Intent(this, BtcrigService::class.java))
+            Thread {
+                runCatching { BtcrigNative.stop() }
+                stopService(Intent(this, BtcrigService::class.java))
+            }.start()
             toast(getString(R.string.stop_failed, error.message ?: error.javaClass.simpleName))
         }
     }

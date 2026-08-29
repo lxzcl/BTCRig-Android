@@ -215,11 +215,13 @@ public final class MainActivity extends Activity {
         try {
             startService(intent);
         } catch (Exception e) {
-            try {
-                BtcrigNative.stop();
-            } catch (Throwable ignored) {
-            }
-            stopService(new Intent(this, BtcrigService.class));
+            new Thread(() -> {
+                try {
+                    BtcrigNative.stop();
+                } catch (Throwable ignored) {
+                }
+                stopService(new Intent(this, BtcrigService.class));
+            }, "BTCRig-stop").start();
             Toast.makeText(this, getString(R.string.stop_failed, e.getMessage()), Toast.LENGTH_LONG).show();
         }
         serviceState = "stopped";

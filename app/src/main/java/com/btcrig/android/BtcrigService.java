@@ -18,13 +18,12 @@ public final class BtcrigService extends Service {
     private static final String CHANNEL_ID = "btcrig";
     private static final int NOTIFICATION_ID = 1;
     private PowerManager.WakeLock wakeLock;
+    private boolean stopping;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
-            safeStopCore();
-            releaseWakeLock();
-            stopSelf();
+            stopCoreAsync();
             return START_NOT_STICKY;
         }
 
@@ -54,9 +53,28 @@ public final class BtcrigService extends Service {
 
     @Override
     public void onDestroy() {
-        safeStopCore();
+        stopCoreAsync();
         releaseWakeLock();
         super.onDestroy();
+    }
+
+    private synchronized boolean markStopping() {
+        if (stopping) {
+            return false;
+        }
+        stopping = true;
+        return true;
+    }
+
+    private void stopCoreAsync() {
+        if (!markStopping()) {
+            return;
+        }
+        new Thread(() -> {
+            safeStopCore();
+            releaseWakeLock();
+            stopSelf();
+        }, "BTCRig-stop").start();
     }
 
     private void safeStopCore() {

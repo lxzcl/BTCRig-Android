@@ -35,6 +35,11 @@
     <string name="view_log">View log</string>
     <string name="copy_log">Copy log</string>
     <string name="copied_to_clipboard">Copied to clipboard.</string>
+    <string name="update_available">Update available: v%1$s</string>
+    <string name="update_checking">Checking for updates...</string>
+    <string name="update_check_failed">Update check failed: %1$s</string>
+    <string name="update_current">Already up to date</string>
+    <string name="update_unknown">Update status unknown</string>
     <string name="backend">Backend</string>
     <string name="self_test">Self-test</string>
     <string name="support_author">Support author</string>

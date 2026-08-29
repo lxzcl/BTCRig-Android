@@ -5,6 +5,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
@@ -84,7 +85,10 @@ import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import java.io.File
 import java.io.FileInputStream
+import java.net.HttpURLConnection
+import java.net.URL
 import java.util.Locale
+import org.json.JSONObject
 
 class ModernActivity : ComponentActivity() {
     private var serviceState = ""
@@ -104,11 +108,18 @@ class ModernActivity : ComponentActivity() {
             var basic by remember { mutableStateOf(readBasic()) }
             var benchmark by remember { mutableStateOf(defaultBenchmarkText()) }
             var benchmarking by remember { mutableStateOf(false) }
+            var update by remember { mutableStateOf(UpdateState()) }
+
+            fun refreshUpdate() {
+                checkForUpdates(ui.version) { update = it }
+            }
+
             DisposableEffect(Unit) {
                 refreshUi = {
                     serviceState = ""
                     basic = readBasic()
                     ui = readUi()
+                    refreshUpdate()
                 }
                 onDispose { refreshUi = null }
             }
@@ -132,13 +143,19 @@ class ModernActivity : ComponentActivity() {
                 }
             }
 
+            LaunchedEffect(Unit) {
+                refreshUpdate()
+            }
+
             BtcrigTheme {
                 BtcrigScreen(
                     ui = ui,
+                    update = update,
                     page = page,
                     benchmark = benchmark,
                     benchmarking = benchmarking,
                     onPage = { page = it },
+                    onOpenUpdate = { openRelease(update) },
                     onStart = {
                         if (startBtcrigService()) {
                             serviceState = "running"
@@ -356,6 +373,43 @@ class ModernActivity : ComponentActivity() {
         toast(getString(R.string.copied_to_clipboard))
     }
 
+    private fun checkForUpdates(currentVersion: String, onResult: (UpdateState) -> Unit) {
+        val prefs = getSharedPreferences("updates", MODE_PRIVATE)
+        val cachedVersion = prefs.getString("latest_version", "").orEmpty()
+        val cachedUrl = prefs.getString("release_url", "").orEmpty()
+        if (cachedVersion.isNotBlank()) {
+            onResult(updateStateFor(currentVersion, cachedVersion, cachedUrl))
+        }
+        val now = System.currentTimeMillis()
+        if (now - prefs.getLong("checked_at", 0L) < UPDATE_CACHE_MS) {
+            return
+        }
+        onResult(updateStateFor(currentVersion, cachedVersion, cachedUrl, checking = true))
+        Thread {
+            val result = runCatching { fetchLatestRelease() }
+            runOnUiThread {
+                result
+                    .onSuccess { release ->
+                        prefs.edit()
+                            .putString("latest_version", release.version)
+                            .putString("release_url", release.url)
+                            .putLong("checked_at", System.currentTimeMillis())
+                            .apply()
+                        onResult(updateStateFor(currentVersion, release.version, release.url))
+                    }
+                    .onFailure { error ->
+                        prefs.edit().putLong("checked_at", System.currentTimeMillis()).apply()
+                        onResult(updateStateFor(currentVersion, cachedVersion, cachedUrl).copy(error = error.message ?: error.javaClass.simpleName))
+                    }
+            }
+        }.start()
+    }
+
+    private fun openRelease(update: UpdateState) {
+        val url = update.url.ifBlank { UPDATE_RELEASE_URL }
+        runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
+    }
+
     private fun defaultBenchmarkText(): String =
         (listOf(getString(R.string.benchmark), getString(R.string.cpu_full_cores_value, "--"), "") +
             CPU_BACKENDS.map { getString(R.string.benchmark_backend_value, it, "--") } +
@@ -416,6 +470,16 @@ private data class UiState(
     val logPath: String,
 )
 
+private data class UpdateState(
+    val latestVersion: String = "",
+    val url: String = "",
+    val available: Boolean = false,
+    val checking: Boolean = false,
+    val error: String = "",
+)
+
+private data class ReleaseInfo(val version: String, val url: String)
+
 private val Ink = Color(0xFF172033)
 private val Muted = Color(0xFF6E7890)
 private val Accent = Color(0xFF26364F)
@@ -425,6 +489,9 @@ private val CardFill = Color(0xFFEFF1F7)
 private val FieldFill = Color.Transparent
 private val CPU_BACKENDS = listOf("openssl", "fast-c", "arm-sha2", "x86-sha-ni")
 private val DONATION_LEVELS = listOf(0, 1, 3, 5, 99)
+private const val UPDATE_API_URL = "https://api.github.com/repos/lxzcl/BTCRig-Android/releases/latest"
+private const val UPDATE_RELEASE_URL = "https://github.com/lxzcl/BTCRig-Android/releases/latest"
+private const val UPDATE_CACHE_MS = 6 * 60 * 60 * 1000L
 
 @Composable
 private fun BtcrigTheme(content: @Composable () -> Unit) {
@@ -459,10 +526,12 @@ private fun PreviewScreen(page: Int) {
     BtcrigTheme {
         BtcrigScreen(
             ui = previewUi(),
+            update = UpdateState(latestVersion = "0.1.3", available = true),
             page = page,
             benchmark = defaultBenchmarkText(),
             benchmarking = false,
             onPage = {},
+            onOpenUpdate = {},
             onStart = {},
             onStop = {},
             onBenchmark = {},
@@ -477,10 +546,12 @@ private fun PreviewScreen(page: Int) {
 @Composable
 private fun BtcrigScreen(
     ui: UiState,
+    update: UpdateState,
     page: Int,
     benchmark: String,
     benchmarking: Boolean,
     onPage: (Int) -> Unit,
+    onOpenUpdate: () -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onBenchmark: () -> Unit,
@@ -522,11 +593,13 @@ private fun BtcrigScreen(
                                 verticalArrangement = Arrangement.spacedBy(16.dp),
                             ) {
                                 PageHeader()
-                                InfoPage(ui, benchmark, benchmarking, onBenchmark, onLog, basic, onBasicChange)
+                                InfoPage(ui, update, benchmark, benchmarking, onBenchmark, onLog, basic, onBasicChange)
                             }
                         }
                         else -> HomePage(
                             ui = ui,
+                            update = update,
+                            onOpenUpdate = onOpenUpdate,
                             onStart = onStart,
                             onStop = onStop,
                             modifier = Modifier.fillMaxSize(),
@@ -593,6 +666,8 @@ private fun BottomNav(page: Int, onPage: (Int) -> Unit) {
 @Composable
 private fun HomePage(
     ui: UiState,
+    update: UpdateState,
+    onOpenUpdate: () -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
     modifier: Modifier = Modifier,
@@ -641,7 +716,7 @@ private fun HomePage(
                         .padding(bottom = 8.dp),
                     contentAlignment = Alignment.BottomCenter,
                 ) {
-                    BrandHeader(ui.version)
+                    BrandHeader(ui.version, update, onOpenUpdate)
                 }
             }
         }
@@ -657,18 +732,12 @@ private fun PageHeader() {
 }
 
 @Composable
-private fun BrandHeader(version: String) {
+private fun BrandHeader(version: String, update: UpdateState, onOpenUpdate: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                "↗",
-                modifier = Modifier.graphicsLayer { alpha = 0f },
-                color = Accent,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-            )
+            UpdateBadge(false, onOpenUpdate)
             Text("v$version", color = MaterialTheme.colorScheme.secondary, fontSize = 13.sp)
-            UpdateBadge()
+            UpdateBadge(update.available, onOpenUpdate)
         }
         BrandTitle(18)
     }
@@ -687,9 +756,12 @@ private fun BrandTitle(size: Int) {
 }
 
 @Composable
-private fun UpdateBadge() {
+private fun UpdateBadge(visible: Boolean, onClick: () -> Unit) {
     Text(
         "↗",
+        modifier = Modifier
+            .graphicsLayer { alpha = if (visible) 1f else 0f }
+            .clickable(enabled = visible, onClick = onClick),
         color = Accent,
         fontSize = 11.sp,
         fontWeight = FontWeight.Bold,
@@ -978,6 +1050,7 @@ private fun SettingSwitchRow(
 @Composable
 private fun InfoPage(
     ui: UiState,
+    update: UpdateState,
     benchmark: String,
     benchmarking: Boolean,
     onBenchmark: () -> Unit,
@@ -994,6 +1067,7 @@ private fun InfoPage(
     BenchmarkBox(benchmark)
     RigButton(text = stringResource(R.string.view_log), onClick = onLog)
     SoftCard(compact = true) {
+        Line(updateText(update))
         Line("${stringResource(R.string.recent_error)}: ${ui.error.ifBlank { stringResource(R.string.no_recent_errors) }}")
         Line("${stringResource(R.string.backend)}: ${ui.backend}")
         Line("${stringResource(R.string.self_test)}: ${if (ui.selfTest) stringResource(R.string.ok) else stringResource(R.string.failed)}")
@@ -1005,6 +1079,15 @@ private fun InfoPage(
         enabled = !ui.running,
         onChange = { onBasicChange(basic.copyBasic(donationPercent = it)) },
     )
+}
+
+@Composable
+private fun updateText(update: UpdateState): String = when {
+    update.checking -> stringResource(R.string.update_checking)
+    update.available -> stringResource(R.string.update_available, update.latestVersion)
+    update.error.isNotBlank() -> stringResource(R.string.update_check_failed, update.error)
+    update.latestVersion.isNotBlank() -> stringResource(R.string.update_current)
+    else -> stringResource(R.string.update_unknown)
 }
 
 @Composable
@@ -1199,6 +1282,60 @@ private fun isImportantLogLine(line: String): Boolean {
         "exception" in lower ||
         "closed connection" in lower ||
         ("opencl" in lower && ("unavailable" in lower || "not found" in lower))
+}
+
+private fun fetchLatestRelease(): ReleaseInfo {
+    val connection = (URL(UPDATE_API_URL).openConnection() as HttpURLConnection).apply {
+        connectTimeout = 7000
+        readTimeout = 7000
+        setRequestProperty("Accept", "application/vnd.github+json")
+        setRequestProperty("User-Agent", "BTCRig-Android")
+    }
+    return try {
+        val code = connection.responseCode
+        if (code !in 200..299) {
+            throw IllegalStateException("HTTP $code")
+        }
+        val json = JSONObject(connection.inputStream.bufferedReader().use { reader -> reader.readText() })
+        val version = normalizeVersion(json.optString("tag_name"))
+        if (version.isBlank()) {
+            throw IllegalStateException("missing tag_name")
+        }
+        ReleaseInfo(version, json.optString("html_url", UPDATE_RELEASE_URL))
+    } finally {
+        connection.disconnect()
+    }
+}
+
+private fun updateStateFor(
+    currentVersion: String,
+    latestVersion: String,
+    url: String,
+    checking: Boolean = false,
+): UpdateState {
+    val latest = normalizeVersion(latestVersion)
+    return UpdateState(
+        latestVersion = latest,
+        url = url,
+        available = latest.isNotBlank() && compareVersions(latest, currentVersion) > 0,
+        checking = checking,
+    )
+}
+
+private fun normalizeVersion(version: String): String = version.trim().removePrefix("v").removePrefix("V")
+
+private fun compareVersions(left: String, right: String): Int {
+    val a = versionParts(left)
+    val b = versionParts(right)
+    for (i in 0 until 3) {
+        if (a[i] != b[i]) return a[i].compareTo(b[i])
+    }
+    return 0
+}
+
+private fun versionParts(version: String): List<Int> {
+    val parts = Regex("\\d+").findAll(version).map { it.value.toIntOrNull() ?: 0 }.take(3).toList()
+    return parts + List(3 - parts.size) { 0 }
 }
 
 private fun cpuSummary(): String {

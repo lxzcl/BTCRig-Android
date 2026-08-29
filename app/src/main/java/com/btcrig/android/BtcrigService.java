@@ -18,16 +18,20 @@ public final class BtcrigService extends Service {
     private static final String CHANNEL_ID = "btcrig";
     private static final int NOTIFICATION_ID = 1;
     private PowerManager.WakeLock wakeLock;
-    private boolean stopping;
+    private volatile boolean stopping;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
-            stopCoreAsync();
+            stopCoreAsync(true);
+            return START_NOT_STICKY;
+        }
+        if (stopping) {
             return START_NOT_STICKY;
         }
 
         createNotificationChannel();
+        startForeground(NOTIFICATION_ID, buildNotification());
         File config;
         try {
             config = BtcrigConfig.ensure(this);
@@ -42,7 +46,7 @@ public final class BtcrigService extends Service {
         }
 
         acquireWakeLock();
-        startForeground(NOTIFICATION_ID, buildNotification());
+        updateNotification();
         return START_STICKY;
     }
 
@@ -53,7 +57,7 @@ public final class BtcrigService extends Service {
 
     @Override
     public void onDestroy() {
-        stopCoreAsync();
+        stopCoreAsync(false);
         releaseWakeLock();
         super.onDestroy();
     }
@@ -66,14 +70,16 @@ public final class BtcrigService extends Service {
         return true;
     }
 
-    private void stopCoreAsync() {
+    private void stopCoreAsync(boolean stopService) {
         if (!markStopping()) {
             return;
         }
         new Thread(() -> {
             safeStopCore();
             releaseWakeLock();
-            stopSelf();
+            if (stopService) {
+                stopSelf();
+            }
         }, "BTCRig-stop").start();
     }
 
@@ -132,6 +138,13 @@ public final class BtcrigService extends Service {
                 .setContentIntent(open)
                 .setOngoing(true)
                 .build();
+    }
+
+    private void updateNotification() {
+        NotificationManager manager = (NotificationManager) getSystemService(NOTIFICATION_SERVICE);
+        if (manager != null) {
+            manager.notify(NOTIFICATION_ID, buildNotification());
+        }
     }
 
     private void createNotificationChannel() {

@@ -55,6 +55,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -84,6 +85,7 @@ import java.util.Locale
 
 class ModernActivity : ComponentActivity() {
     private var serviceState = ""
+    private var refreshUi: (() -> Unit)? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -98,6 +100,14 @@ class ModernActivity : ComponentActivity() {
             var basic by remember { mutableStateOf(readBasic()) }
             var benchmark by remember { mutableStateOf(defaultBenchmarkText()) }
             var benchmarking by remember { mutableStateOf(false) }
+            DisposableEffect(Unit) {
+                refreshUi = {
+                    serviceState = ""
+                    basic = readBasic()
+                    ui = readUi()
+                }
+                onDispose { refreshUi = null }
+            }
             fun saveBasic(next: BtcrigConfig.Basic) {
                 basic = next
                 runCatching { BtcrigConfig.writeBasic(this, next) }
@@ -201,6 +211,11 @@ class ModernActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshUi?.invoke()
     }
 
     private fun requestNotificationPermission() {

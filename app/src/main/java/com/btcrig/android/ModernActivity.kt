@@ -75,6 +75,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -112,7 +113,7 @@ class ModernActivity : ComponentActivity() {
                 basic = next
                 runCatching { BtcrigConfig.writeBasic(this, next) }
                     .onSuccess { ui = readUi() }
-                    .onFailure { error -> toast("Save failed: ${error.message}") }
+                    .onFailure { error -> toast(getString(R.string.save_failed, error.message)) }
             }
             fun refreshSoon() {
                 Thread {
@@ -153,26 +154,30 @@ class ModernActivity : ComponentActivity() {
                     },
                     onBenchmark = {
                         if (ui.running) {
-                            toast("Stop mining before benchmark.")
+                            toast(getString(R.string.stop_mining_before_benchmark))
                             return@BtcrigScreen
                         }
                         benchmarking = true
                         val configPath = runCatching { BtcrigConfig.ensure(this).absolutePath }.getOrDefault("")
                         val threads = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+                        val benchmarkTitle = getString(R.string.benchmark)
+                        val cpuFullCores = getString(R.string.cpu_full_cores_value, threads.toString())
+                        val testing = getString(R.string.testing)
+                        val unavailable = getString(R.string.unavailable)
                         Thread {
-                            val lines = mutableListOf("Benchmark", "CPU full cores: $threads", "")
+                            val lines = mutableListOf(benchmarkTitle, cpuFullCores, "")
                             for (backend in CPU_BACKENDS) {
                                 runOnUiThread {
-                                    benchmark = (lines + "$backend: testing...").joinToString("\n")
+                                    benchmark = (lines + getString(R.string.benchmark_backend_value, backend, testing)).joinToString("\n")
                                 }
                                 val hps = BtcrigNative.benchmarkCpuBackend(backend, 1, threads)
-                                lines.add("$backend: ${if (hps >= 0.0) formatHashrate(hps) else "unavailable"}")
+                                lines.add(getString(R.string.benchmark_backend_value, backend, if (hps >= 0.0) formatHashrate(hps) else unavailable))
                             }
                             runOnUiThread {
-                                benchmark = (lines + "opencl: testing...").joinToString("\n")
+                                benchmark = (lines + getString(R.string.benchmark_backend_value, "opencl", testing)).joinToString("\n")
                             }
                             val openclHps = BtcrigNative.benchmarkOpencl(configPath, 1)
-                            lines.add("opencl: ${if (openclHps >= 0.0) formatHashrate(openclHps) else "unavailable"}")
+                            lines.add(getString(R.string.benchmark_backend_value, "opencl", if (openclHps >= 0.0) formatHashrate(openclHps) else unavailable))
                             runOnUiThread {
                                 benchmarking = false
                                 benchmark = lines.joinToString("\n")
@@ -195,9 +200,9 @@ class ModernActivity : ComponentActivity() {
                                     showJson = false
                                     basic = readBasic()
                                     ui = readUi()
-                                    toast("Config saved.")
+                                    toast(getString(R.string.config_saved))
                                 }
-                                .onFailure { error -> toast("Save failed: ${error.message}") }
+                                .onFailure { error -> toast(getString(R.string.save_failed, error.message)) }
                         },
                     )
                 }
@@ -205,7 +210,12 @@ class ModernActivity : ComponentActivity() {
                 if (showLog) {
                     TextDialog(
                         title = "btcrig.log",
-                        text = readTail(File(filesDir, "btcrig.log"), 64 * 1024),
+                        text = readTail(
+                            File(filesDir, "btcrig.log"),
+                            64 * 1024,
+                            getString(R.string.log_not_found),
+                            getString(R.string.empty_log),
+                        ) { getString(R.string.log_read_failed, it) },
                         onDismiss = { showLog = false },
                     )
                 }
@@ -229,16 +239,16 @@ class ModernActivity : ComponentActivity() {
     private fun startBtcrigService(): Boolean {
         val basic = runCatching { BtcrigConfig.readBasic(this) }.getOrNull() ?: return false
         if (basic.poolUrl.trim().isEmpty() || basic.user.trim().isEmpty()) {
-            toast("Configure pool and user first.")
+            toast(getString(R.string.configure_pool_user_first))
             return false
         }
         if (basic.cpuThreads <= 0 && !basic.openclEnabled) {
-            toast("Enable CPU threads or OpenCL first.")
+            toast(getString(R.string.enable_cpu_or_opencl_first))
             return false
         }
         runCatching { BtcrigConfig.writeBasic(this, basic) }
             .onFailure { error ->
-                toast("Config save failed: ${error.message}")
+                toast(getString(R.string.config_save_failed, error.message))
                 return false
             }
         val intent = Intent(this, BtcrigService::class.java)
@@ -252,14 +262,16 @@ class ModernActivity : ComponentActivity() {
 
     private fun readUi(): UiState {
         val running = BtcrigNative.isRunning()
-        val configPath = runCatching { BtcrigConfig.ensure(this).absolutePath }.getOrDefault("(unavailable)")
+        val configPath = runCatching { BtcrigConfig.ensure(this).absolutePath }.getOrDefault(getString(R.string.unavailable_wrapped))
         val logPath = File(filesDir, "btcrig.log").absolutePath
-        val configuredPool = runCatching { BtcrigConfig.readBasic(this).poolUrl.ifBlank { "not configured" } }
-            .getOrDefault("unavailable")
+        val configuredPool = runCatching { BtcrigConfig.readBasic(this).poolUrl.ifBlank { getString(R.string.not_configured) } }
+            .getOrDefault(getString(R.string.unavailable))
         val configSummary = runCatching {
             val basic = BtcrigConfig.readBasic(this)
-            "CPU: ${if (basic.cpuThreads > 0) "${basic.cpuThreads} threads" else "disabled"} / OpenCL: ${if (basic.openclEnabled) "enabled" else "disabled"}"
-        }.getOrDefault("Config summary unavailable")
+            val cpu = if (basic.cpuThreads > 0) getString(R.string.cpu_threads_value, basic.cpuThreads) else getString(R.string.disabled)
+            val openclValue = if (basic.openclEnabled) getString(R.string.enabled) else getString(R.string.disabled)
+            getString(R.string.cpu_opencl_summary, cpu, openclValue)
+        }.getOrDefault(getString(R.string.config_summary_unavailable))
         val opencl = runCatching { BtcrigNative.openclStatus(configPath) }
             .getOrDefault("Config: unavailable\nRuntime: not probed\nMode: CPU only")
 
@@ -270,20 +282,25 @@ class ModernActivity : ComponentActivity() {
             running = running,
             service = serviceState.ifEmpty { if (running) "running" else "stopped" },
             hashrate = if (running) formatHashrate(BtcrigNative.hashrate()) else "-- H/s",
-            workers = if (running) "Workers: ${BtcrigNative.workerCount()}" else "Workers: --",
-            total = if (running) "Total: ${BtcrigNative.totalHashes()}" else "Total: --",
-            pool = if (running) BtcrigNative.pool().ifBlank { "(not configured)" } else configuredPool,
+            workers = if (running) getString(R.string.workers_value, BtcrigNative.workerCount()) else getString(R.string.workers_empty),
+            total = if (running) getString(R.string.total_value, BtcrigNative.totalHashes()) else getString(R.string.total_empty),
+            pool = if (running) BtcrigNative.pool().ifBlank { getString(R.string.not_configured_wrapped) } else configuredPool,
             stratum = if (running) {
-                "Stratum: ${BtcrigNative.stratumStatus()} / connected: ${if (BtcrigNative.stratumConnected()) "yes" else "no"} / jobs: ${BtcrigNative.stratumJobs()}"
+                getString(
+                    R.string.stratum_running,
+                    BtcrigNative.stratumStatus(),
+                    if (BtcrigNative.stratumConnected()) getString(R.string.yes) else getString(R.string.no),
+                    BtcrigNative.stratumJobs(),
+                )
             } else {
-                "Stratum: stopped"
+                getString(R.string.stratum_stopped)
             },
             shares = if (running) {
-                "Shares: ${BtcrigNative.stratumSubmits()} submit / ${BtcrigNative.stratumAccepts()} ok / ${BtcrigNative.stratumRejects()} reject"
+                getString(R.string.shares_running, BtcrigNative.stratumSubmits(), BtcrigNative.stratumAccepts(), BtcrigNative.stratumRejects())
             } else {
-                "Shares: --"
+                getString(R.string.shares_empty)
             },
-            error = BtcrigNative.lastError().ifBlank { "none" },
+            error = BtcrigNative.lastError(),
             opencl = opencl,
             cpuSummary = cpuSummary(),
             gpuSummary = gpuSummary(opencl),
@@ -297,6 +314,39 @@ class ModernActivity : ComponentActivity() {
 
     private fun readBasic(): BtcrigConfig.Basic =
         runCatching { BtcrigConfig.readBasic(this) }.getOrElse { BtcrigConfig.Basic() }
+
+    private fun defaultBenchmarkText(): String =
+        (listOf(getString(R.string.benchmark), getString(R.string.cpu_full_cores_value, "--"), "") +
+            CPU_BACKENDS.map { getString(R.string.benchmark_backend_value, it, "--") } +
+            getString(R.string.benchmark_backend_value, "opencl", "--")).joinToString("\n")
+
+    private fun cpuSummary(): String {
+        val model = if (Build.VERSION.SDK_INT >= 31) {
+            listOf(Build.SOC_MANUFACTURER, Build.SOC_MODEL).filter { it.isNotBlank() }.joinToString(" ")
+        } else {
+            runCatching {
+                File("/proc/cpuinfo").readLines()
+                    .firstOrNull { it.startsWith("Hardware") || it.startsWith("Processor") || it.startsWith("model name") }
+                    ?.substringAfter(':')
+                    ?.trim()
+            }.getOrNull().orEmpty()
+        }.ifBlank { Build.HARDWARE.ifBlank { getString(R.string.unknown_cpu) } }
+        return getString(R.string.cpu_summary_value, model, Runtime.getRuntime().availableProcessors(), Build.SUPPORTED_ABIS.firstOrNull().orEmpty())
+    }
+
+    private fun gpuSummary(opencl: String): String {
+        val device = opencl.lineSequence().firstOrNull { it.startsWith("#0 ") } ?: return opencl
+            .lineSequence()
+            .firstOrNull { it.startsWith("Runtime:") || it.startsWith("Mode:") }
+            ?.substringAfter(':')
+            ?.trim()
+            ?.ifBlank { getString(R.string.no_opencl_device) }
+            ?: getString(R.string.no_opencl_device)
+        val parts = device.split('/').map { it.trim() }
+        val name = parts.getOrNull(2).orEmpty().ifBlank { parts.getOrNull(1).orEmpty() }
+        val api = parts.getOrNull(3).orEmpty()
+        return api.ifBlank { name }.ifBlank { device }
+    }
 
     @Suppress("DEPRECATION")
     private fun versionName(): String = runCatching {
@@ -466,7 +516,11 @@ private fun BottomNav(page: Int, onPage: (Int) -> Unit) {
                     .navigationBarsPadding()
                     .padding(horizontal = 24.dp, vertical = 12.dp)
             ) {
-                listOf("首页", "设置", "信息").forEachIndexed { index, title ->
+                listOf(
+                    stringResource(R.string.tab_home),
+                    stringResource(R.string.tab_settings),
+                    stringResource(R.string.tab_info),
+                ).forEachIndexed { index, title ->
                     Column(
                         modifier = Modifier
                             .weight(1f)
@@ -523,7 +577,7 @@ private fun HomePage(
             EnterUp(delayMillis = 180) {
                 StatusPill(
                     running = ui.running,
-                    text = if (ui.running) "运行中" else "已停止",
+                    text = if (ui.running) stringResource(R.string.status_running) else stringResource(R.string.status_stopped),
                     onClick = { if (ui.running) onStop() else onStart() },
                 )
             }
@@ -531,11 +585,11 @@ private fun HomePage(
                 Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     SpecRow("CPU", ui.cpuSummary)
                     SpecRow("GPU", ui.gpuSummary)
-                    SpecRow("矿池", ui.pool)
+                    SpecRow(stringResource(R.string.pool_label), ui.pool)
                 }
             }
-            if (ui.error != "none") {
-                AppCard("Last error") { Line(ui.error) }
+            if (ui.error.isNotBlank()) {
+                AppCard(stringResource(R.string.last_error)) { Line(ui.error) }
             }
         }
         Box(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
@@ -557,7 +611,7 @@ private fun HomePage(
 private fun PageHeader() {
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         BrandTitle(42)
-        Text("Android miner shell · CPU / OpenCL", color = MaterialTheme.colorScheme.secondary)
+        Text(stringResource(R.string.page_subtitle), color = MaterialTheme.colorScheme.secondary)
     }
 }
 
@@ -758,53 +812,53 @@ private fun SettingsPage(
     onJson: () -> Unit,
 ) {
     val enabled = !ui.running
-    SettingSection("设置", compact = true) {
+    SettingSection(stringResource(R.string.settings_title), compact = true) {
         SettingField(
             value = basic.poolUrl,
             onValueChange = { onBasicChange(basic.copyBasic(poolUrl = it)) },
-            label = "矿池地址",
+            label = stringResource(R.string.pool_url),
             enabled = enabled,
         )
         SettingField(
             value = basic.user,
             onValueChange = { onBasicChange(basic.copyBasic(user = it)) },
-            label = "用户 / worker",
+            label = stringResource(R.string.user_worker),
             enabled = enabled,
         )
         SettingField(
             value = basic.pass,
             onValueChange = { onBasicChange(basic.copyBasic(pass = it)) },
-            label = "密码",
+            label = stringResource(R.string.password),
             enabled = enabled,
         )
         SettingField(
             value = basic.cpuThreads.toString(),
             onValueChange = { onBasicChange(basic.copyBasic(cpuThreads = it.filter(Char::isDigit).toIntOrNull() ?: 0)) },
-            label = "CPU 数量",
+            label = stringResource(R.string.cpu_threads),
             enabled = enabled,
-            helper = "0 = 不使用 CPU 挖矿",
+            helper = stringResource(R.string.cpu_threads_helper),
         )
         SettingField(
             value = basic.difficulty.toString(),
             onValueChange = { onBasicChange(basic.copyBasic(difficulty = it.toDoubleOrNull() ?: 0.0)) },
-            label = "难度",
+            label = stringResource(R.string.difficulty),
             enabled = enabled,
-            helper = "0 = 不指定矿池难度",
+            helper = stringResource(R.string.difficulty_helper),
         )
-        SettingSwitchRow("启用 OpenCL / GPU", basic.openclEnabled, enabled) {
+        SettingSwitchRow(stringResource(R.string.enable_opencl_gpu), basic.openclEnabled, enabled) {
             onBasicChange(basic.copyBasic(openclEnabled = it))
         }
-        SettingSwitchRow("兼容未知证书", basic.certCompat, enabled) {
+        SettingSwitchRow(stringResource(R.string.allow_unknown_certs), basic.certCompat, enabled) {
             onBasicChange(basic.copyBasic(certCompat = it))
         }
-        SettingSwitchRow("保持唤醒", basic.wakeLock, enabled) {
+        SettingSwitchRow(stringResource(R.string.keep_awake), basic.wakeLock, enabled) {
             onBasicChange(basic.copyBasic(wakeLock = it))
         }
         if (!enabled) {
-            Line("停止服务后才能保存设置")
+            Line(stringResource(R.string.stop_service_before_save))
         }
     }
-    RigButton(text = "高级 JSON", onClick = onJson, enabled = enabled)
+    RigButton(text = stringResource(R.string.advanced_json), onClick = onJson, enabled = enabled)
 }
 
 @Composable
@@ -890,19 +944,19 @@ private fun InfoPage(
     basic: BtcrigConfig.Basic,
     onBasicChange: (BtcrigConfig.Basic) -> Unit,
 ) {
-    Text("信息", color = RigBlue, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+    Text(stringResource(R.string.info_title), color = RigBlue, fontSize = 13.sp, fontWeight = FontWeight.Medium)
     RigButton(
-        text = if (benchmarking) "Benchmarking..." else "Benchmark CPU",
+        text = if (benchmarking) stringResource(R.string.benchmarking) else stringResource(R.string.benchmark),
         onClick = onBenchmark,
         enabled = !benchmarking && !ui.running
     )
     BenchmarkBox(benchmark)
-    RigButton(text = "View log", onClick = onLog)
+    RigButton(text = stringResource(R.string.view_log), onClick = onLog)
     SoftCard(compact = true) {
-        Line("Backend: ${ui.backend}")
-        Line("Self-test: ${if (ui.selfTest) "ok" else "failed"}")
-        Line("OpenCL:\n${ui.opencl}")
-        Line("Config: ${ui.configPath}\nLog: ${ui.logPath}")
+        Line("${stringResource(R.string.backend)}: ${ui.backend}")
+        Line("${stringResource(R.string.self_test)}: ${if (ui.selfTest) stringResource(R.string.ok) else stringResource(R.string.failed)}")
+        Line("${stringResource(R.string.opencl_label)}:\n${ui.opencl}")
+        Line(stringResource(R.string.config_log_value, ui.configPath, ui.logPath))
     }
     DonationCard(
         percent = basic.donationPercent,
@@ -914,9 +968,9 @@ private fun InfoPage(
 @Composable
 private fun DonationCard(percent: Int, enabled: Boolean, onChange: (Int) -> Unit) {
     val index = DONATION_LEVELS.indexOf(percent).takeIf { it >= 0 } ?: DONATION_LEVELS.indexOf(1)
-    SettingSection("支持作者", compact = true) {
+    SettingSection(stringResource(R.string.support_author), compact = true) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Text("捐赠比例", modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.secondary, fontSize = 15.sp)
+            Text(stringResource(R.string.donation_ratio), modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.secondary, fontSize = 15.sp)
             Text("${DONATION_LEVELS[index]}%", color = RigBlue, fontSize = 16.sp, fontWeight = FontWeight.Medium)
         }
         Slider(
@@ -1024,7 +1078,7 @@ private fun JsonDialog(text: String, onDismiss: () -> Unit, onSave: (String) -> 
     var json by remember { mutableStateOf(text) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Edit config.json") },
+        title = { Text(stringResource(R.string.edit_config_json)) },
         text = {
             OutlinedTextField(
                 value = json,
@@ -1034,8 +1088,8 @@ private fun JsonDialog(text: String, onDismiss: () -> Unit, onSave: (String) -> 
                     .height(360.dp),
             )
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
-        confirmButton = { Button(onClick = { onSave(json) }) { Text("Save") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+        confirmButton = { Button(onClick = { onSave(json) }) { Text(stringResource(R.string.save)) } },
     )
 }
 
@@ -1053,12 +1107,18 @@ private fun TextDialog(title: String, text: String, onDismiss: () -> Unit) {
                 fontSize = 12.sp,
             )
         },
-        confirmButton = { Button(onClick = onDismiss) { Text("Close") } },
+        confirmButton = { Button(onClick = onDismiss) { Text(stringResource(R.string.close)) } },
     )
 }
 
-private fun readTail(file: File, maxBytes: Int): String {
-    if (!file.exists()) return "(log not found)"
+private fun readTail(
+    file: File,
+    maxBytes: Int,
+    missing: String = "(log not found)",
+    empty: String = "(empty log)",
+    failed: (String) -> String = { "Log read failed: $it" },
+): String {
+    if (!file.exists()) return missing
     return runCatching {
         FileInputStream(file).use { input ->
             var skip = (file.length() - maxBytes).coerceAtLeast(0)
@@ -1069,9 +1129,9 @@ private fun readTail(file: File, maxBytes: Int): String {
             }
             val buffer = ByteArray(minOf(maxBytes.toLong(), file.length()).toInt())
             val n = input.read(buffer)
-            if (n > 0) String(buffer, 0, n) else "(empty log)"
+            if (n > 0) String(buffer, 0, n) else empty
         }
-    }.getOrElse { "Log read failed: ${it.message}" }
+    }.getOrElse { failed(it.message.orEmpty()) }
 }
 
 private fun cpuSummary(): String {

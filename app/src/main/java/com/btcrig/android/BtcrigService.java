@@ -99,10 +99,10 @@ public final class BtcrigService extends Service {
                 : new Notification.Builder(this);
 
         return builder
-                .setContentTitle("BTCRig is ready")
+                .setContentTitle(getString(R.string.notification_title_ready))
                 .setContentText(BtcrigNative.isRunning()
-                        ? "Stratum: " + BtcrigNative.stratumStatus()
-                        : "Miner core is stopped.")
+                        ? getString(R.string.notification_stratum, BtcrigNative.stratumStatus())
+                        : getString(R.string.notification_core_stopped))
                 .setSmallIcon(android.R.drawable.stat_sys_upload)
                 .setContentIntent(open)
                 .setOngoing(true)
@@ -116,7 +116,7 @@ public final class BtcrigService extends Service {
 
         NotificationChannel channel = new NotificationChannel(
                 CHANNEL_ID,
-                "BTCRig",
+                getString(R.string.app_name),
                 NotificationManager.IMPORTANCE_LOW);
         NotificationManager manager = getSystemService(NotificationManager.class);
         if (manager != null) {

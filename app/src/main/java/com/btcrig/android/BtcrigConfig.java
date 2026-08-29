@@ -27,6 +27,7 @@ final class BtcrigConfig {
         double difficulty = 0.1;
         boolean openclEnabled = true;
         boolean certCompat = true;
+        boolean wakeLock = true;
         int donationPercent = 1;
     }
 
@@ -85,6 +86,7 @@ final class BtcrigConfig {
             basic.certCompat = tls.optBoolean("compat", basic.certCompat);
         }
         basic.certCompat = root.optBoolean("tls_compat", basic.certCompat);
+        basic.wakeLock = root.optBoolean("wake_lock", basic.wakeLock);
 
         JSONObject donation = root.optJSONObject("donation");
         if (donation != null) {
@@ -157,6 +159,7 @@ final class BtcrigConfig {
             donation.put("address", DEFAULT_USER);
         }
         root.put("donate-level", donationPercent);
+        root.put("wake_lock", basic.wakeLock);
 
         JSONArray pools = root.optJSONArray("pools");
         if (pools == null) {
@@ -247,6 +250,10 @@ final class BtcrigConfig {
             }
             if (!root.has("donate-level")) {
                 root.put("donate-level", donationPercent);
+                changed = true;
+            }
+            if (!root.has("wake_lock")) {
+                root.put("wake_lock", true);
                 changed = true;
             }
 

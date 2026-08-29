@@ -8,6 +8,7 @@ import android.app.Service;
 import android.content.Intent;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.PowerManager;
 
 import java.io.File;
 import java.io.IOException;
@@ -16,11 +17,13 @@ public final class BtcrigService extends Service {
     static final String ACTION_STOP = "com.btcrig.android.STOP";
     private static final String CHANNEL_ID = "btcrig";
     private static final int NOTIFICATION_ID = 1;
+    private PowerManager.WakeLock wakeLock;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
             BtcrigNative.stop();
+            releaseWakeLock();
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -34,10 +37,12 @@ public final class BtcrigService extends Service {
             return START_NOT_STICKY;
         }
         if (!BtcrigNative.start(config.getAbsolutePath())) {
+            releaseWakeLock();
             stopSelf();
             return START_NOT_STICKY;
         }
 
+        acquireWakeLock();
         startForeground(NOTIFICATION_ID, buildNotification());
         return START_STICKY;
     }
@@ -50,7 +55,31 @@ public final class BtcrigService extends Service {
     @Override
     public void onDestroy() {
         BtcrigNative.stop();
+        releaseWakeLock();
         super.onDestroy();
+    }
+
+    private void acquireWakeLock() {
+        try {
+            if (!BtcrigConfig.readBasic(this).wakeLock || wakeLock != null && wakeLock.isHeld()) {
+                return;
+            }
+            PowerManager manager = (PowerManager) getSystemService(POWER_SERVICE);
+            if (manager == null) {
+                return;
+            }
+            wakeLock = manager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "BTCRig:Miner");
+            wakeLock.setReferenceCounted(false);
+            wakeLock.acquire();
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void releaseWakeLock() {
+        if (wakeLock != null && wakeLock.isHeld()) {
+            wakeLock.release();
+        }
+        wakeLock = null;
     }
 
     @SuppressWarnings("deprecation")

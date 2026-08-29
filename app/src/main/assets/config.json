@@ -17,6 +17,7 @@
     "address": "bc1qqz0wutk9kk5mmaf7fu4dm5w4fq4fhaah9hpzr3"
   },
   "donate-level": 1,
+  "wake_lock": true,
   "pools": [
     {
       "url": "stratum+tcp://public-pool.io:3333",

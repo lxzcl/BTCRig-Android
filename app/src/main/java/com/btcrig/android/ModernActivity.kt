@@ -782,6 +782,9 @@ private fun SettingsPage(
         SettingSwitchRow("兼容未知证书", basic.certCompat, enabled) {
             onBasicChange(basic.copyBasic(certCompat = it))
         }
+        SettingSwitchRow("保持唤醒", basic.wakeLock, enabled) {
+            onBasicChange(basic.copyBasic(wakeLock = it))
+        }
         if (!enabled) {
             Line("停止服务后才能保存设置")
         }
@@ -1112,6 +1115,7 @@ private fun previewBasic() = BtcrigConfig.Basic().apply {
     cpuThreads = 8
     openclEnabled = true
     certCompat = true
+    wakeLock = true
     donationPercent = 1
 }
 
@@ -1123,6 +1127,7 @@ private fun BtcrigConfig.Basic.copyBasic(
     difficulty: Double = this.difficulty,
     openclEnabled: Boolean = this.openclEnabled,
     certCompat: Boolean = this.certCompat,
+    wakeLock: Boolean = this.wakeLock,
     donationPercent: Int = this.donationPercent,
 ): BtcrigConfig.Basic {
     val next = BtcrigConfig.Basic()
@@ -1133,6 +1138,7 @@ private fun BtcrigConfig.Basic.copyBasic(
     next.difficulty = difficulty.coerceAtLeast(0.0)
     next.openclEnabled = openclEnabled
     next.certCompat = certCompat
+    next.wakeLock = wakeLock
     next.donationPercent = DONATION_LEVELS.find { it == donationPercent } ?: 1
     return next
 }

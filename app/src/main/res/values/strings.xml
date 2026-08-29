@@ -13,6 +13,8 @@
     <string name="status_stopped">Stopped</string>
     <string name="pool_label">Pool</string>
     <string name="last_error">Last error</string>
+    <string name="recent_error">Recent error</string>
+    <string name="no_recent_errors">No recent errors</string>
     <string name="page_subtitle">Android miner shell · CPU / OpenCL</string>
     <string name="settings_title">Settings</string>
     <string name="pool_url">Pool URL</string>
@@ -31,6 +33,8 @@
     <string name="benchmark">Benchmark</string>
     <string name="benchmarking">Benchmarking...</string>
     <string name="view_log">View log</string>
+    <string name="copy_log">Copy log</string>
+    <string name="copied_to_clipboard">Copied to clipboard.</string>
     <string name="backend">Backend</string>
     <string name="self_test">Self-test</string>
     <string name="support_author">Support author</string>
@@ -71,6 +75,10 @@
     <string name="log_not_found">(log not found)</string>
     <string name="empty_log">(empty log)</string>
     <string name="log_read_failed">Log read failed: %1$s</string>
+    <string name="error_hint_tls">TLS connection failed. Check certificate compatibility or the pool address.</string>
+    <string name="error_hint_opencl">OpenCL is unavailable. Try disabling GPU mining or check the device OpenCL driver.</string>
+    <string name="error_hint_pool">Pool connection failed. Check network, address, and port.</string>
+    <string name="error_hint_config">Config looks invalid. Check pool URL, user, or advanced JSON.</string>
     <string name="notification_title_ready">BTCRig is ready</string>
     <string name="notification_stratum">Stratum: %1$s</string>
     <string name="notification_core_stopped">Miner core is stopped.</string>

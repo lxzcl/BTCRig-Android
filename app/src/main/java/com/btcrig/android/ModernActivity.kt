@@ -1,6 +1,8 @@
 package com.btcrig.android
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -98,6 +100,7 @@ class ModernActivity : ComponentActivity() {
             var page by remember { mutableStateOf(0) }
             var showJson by remember { mutableStateOf(false) }
             var showLog by remember { mutableStateOf(false) }
+            var logText by remember { mutableStateOf("") }
             var basic by remember { mutableStateOf(readBasic()) }
             var benchmark by remember { mutableStateOf(defaultBenchmarkText()) }
             var benchmarking by remember { mutableStateOf(false) }
@@ -187,7 +190,10 @@ class ModernActivity : ComponentActivity() {
                     basic = basic,
                     onBasicChange = { saveBasic(it) },
                     onJson = { showJson = true },
-                    onLog = { showLog = true },
+                    onLog = {
+                        logText = readLogText()
+                        showLog = true
+                    },
                 )
 
                 if (showJson) {
@@ -210,12 +216,8 @@ class ModernActivity : ComponentActivity() {
                 if (showLog) {
                     TextDialog(
                         title = "btcrig.log",
-                        text = readTail(
-                            File(filesDir, "btcrig.log"),
-                            64 * 1024,
-                            getString(R.string.log_not_found),
-                            getString(R.string.empty_log),
-                        ) { getString(R.string.log_read_failed, it) },
+                        text = logText,
+                        onCopy = { copyToClipboard("btcrig.log", logText) },
                         onDismiss = { showLog = false },
                     )
                 }
@@ -263,7 +265,8 @@ class ModernActivity : ComponentActivity() {
     private fun readUi(): UiState {
         val running = BtcrigNative.isRunning()
         val configPath = runCatching { BtcrigConfig.ensure(this).absolutePath }.getOrDefault(getString(R.string.unavailable_wrapped))
-        val logPath = File(filesDir, "btcrig.log").absolutePath
+        val logFile = File(filesDir, "btcrig.log")
+        val logPath = logFile.absolutePath
         val configuredPool = runCatching { BtcrigConfig.readBasic(this).poolUrl.ifBlank { getString(R.string.not_configured) } }
             .getOrDefault(getString(R.string.unavailable))
         val configSummary = runCatching {
@@ -274,6 +277,9 @@ class ModernActivity : ComponentActivity() {
         }.getOrDefault(getString(R.string.config_summary_unavailable))
         val opencl = runCatching { BtcrigNative.openclStatus(configPath) }
             .getOrDefault("Config: unavailable\nRuntime: not probed\nMode: CPU only")
+        val nativeError = cleanLog(BtcrigNative.lastError()).trim()
+        val logError = recentLogError(logFile)
+        val error = readableError(if (nativeError.startsWith("core returned")) logError.ifBlank { nativeError } else nativeError.ifBlank { logError })
 
         return UiState(
             version = versionName(),
@@ -300,7 +306,7 @@ class ModernActivity : ComponentActivity() {
             } else {
                 getString(R.string.shares_empty)
             },
-            error = BtcrigNative.lastError(),
+            error = error,
             opencl = opencl,
             cpuSummary = cpuSummary(),
             gpuSummary = gpuSummary(opencl),
@@ -314,6 +320,33 @@ class ModernActivity : ComponentActivity() {
 
     private fun readBasic(): BtcrigConfig.Basic =
         runCatching { BtcrigConfig.readBasic(this) }.getOrElse { BtcrigConfig.Basic() }
+
+    private fun readLogText(): String = readTail(
+        File(filesDir, "btcrig.log"),
+        64 * 1024,
+        getString(R.string.log_not_found),
+        getString(R.string.empty_log),
+    ) { getString(R.string.log_read_failed, it) }
+
+    private fun readableError(raw: String): String {
+        val text = cleanLog(raw).trim()
+        if (text.isEmpty()) return ""
+        val lower = text.lowercase(Locale.US)
+        val hint = when {
+            "sslhandshakeexception" in lower || "certificate" in lower -> R.string.error_hint_tls
+            "opencl" in lower && ("failed" in lower || "unavailable" in lower || "not found" in lower) -> R.string.error_hint_opencl
+            "connect" in lower || "[net]" in lower || "closed connection" in lower -> R.string.error_hint_pool
+            "json" in lower || "bad config" in lower || "invalid url" in lower -> R.string.error_hint_config
+            else -> 0
+        }
+        return if (hint == 0) text else "${getString(hint)}\n$text"
+    }
+
+    private fun copyToClipboard(label: String, text: String) {
+        val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText(label, text))
+        toast(getString(R.string.copied_to_clipboard))
+    }
 
     private fun defaultBenchmarkText(): String =
         (listOf(getString(R.string.benchmark), getString(R.string.cpu_full_cores_value, "--"), "") +
@@ -953,6 +986,7 @@ private fun InfoPage(
     BenchmarkBox(benchmark)
     RigButton(text = stringResource(R.string.view_log), onClick = onLog)
     SoftCard(compact = true) {
+        Line("${stringResource(R.string.recent_error)}: ${ui.error.ifBlank { stringResource(R.string.no_recent_errors) }}")
         Line("${stringResource(R.string.backend)}: ${ui.backend}")
         Line("${stringResource(R.string.self_test)}: ${if (ui.selfTest) stringResource(R.string.ok) else stringResource(R.string.failed)}")
         Line("${stringResource(R.string.opencl_label)}:\n${ui.opencl}")
@@ -1094,7 +1128,7 @@ private fun JsonDialog(text: String, onDismiss: () -> Unit, onSave: (String) -> 
 }
 
 @Composable
-private fun TextDialog(title: String, text: String, onDismiss: () -> Unit) {
+private fun TextDialog(title: String, text: String, onCopy: () -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title) },
@@ -1107,6 +1141,7 @@ private fun TextDialog(title: String, text: String, onDismiss: () -> Unit) {
                 fontSize = 12.sp,
             )
         },
+        dismissButton = { TextButton(onClick = onCopy) { Text(stringResource(R.string.copy_log)) } },
         confirmButton = { Button(onClick = onDismiss) { Text(stringResource(R.string.close)) } },
     )
 }
@@ -1129,9 +1164,33 @@ private fun readTail(
             }
             val buffer = ByteArray(minOf(maxBytes.toLong(), file.length()).toInt())
             val n = input.read(buffer)
-            if (n > 0) String(buffer, 0, n) else empty
+            if (n > 0) cleanLog(String(buffer, 0, n)) else empty
         }
     }.getOrElse { failed(it.message.orEmpty()) }
+}
+
+private val AnsiEscape = Regex("\u001B\\[[0-9;]*[A-Za-z]")
+
+private fun cleanLog(text: String): String = AnsiEscape.replace(text, "")
+
+private fun recentLogError(file: File): String =
+    readTail(file, 64 * 1024, "", "") { "" }
+        .lineSequence()
+        .map { it.trim() }
+        .filter { it.isNotEmpty() }
+        .toList()
+        .asReversed()
+        .firstOrNull(::isImportantLogLine)
+        .orEmpty()
+
+private fun isImportantLogLine(line: String): Boolean {
+    val lower = line.lowercase(Locale.US)
+    return "failed" in lower ||
+        "error" in lower ||
+        "invalid" in lower ||
+        "exception" in lower ||
+        "closed connection" in lower ||
+        ("opencl" in lower && ("unavailable" in lower || "not found" in lower))
 }
 
 private fun cpuSummary(): String {
@@ -1174,7 +1233,7 @@ private fun previewUi() = UiState(
     pool = "stratum+tcp://public-pool.io:3333",
     stratum = "Stratum: authorized / connected: yes / jobs: 8",
     shares = "Shares: 3 submit / 3 ok / 0 reject",
-    error = "none",
+    error = "",
     opencl = "Config: enabled\nRuntime: available\n#0 / Qualcomm / Adreno(TM) 750 / OpenCL 3.0",
     cpuSummary = "QTI SM8650 · 8 cores · arm64-v8a",
     gpuSummary = "OpenCL 3.0 Adreno(TM) 750",

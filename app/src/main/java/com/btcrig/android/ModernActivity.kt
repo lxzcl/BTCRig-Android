@@ -705,11 +705,13 @@ private fun HomePage(
                 }
             }
             if (ui.error.isNotBlank()) {
-                AppCard(stringResource(R.string.last_error)) { Line(ui.error) }
+                EnterUp(delayMillis = 420) {
+                    AppCard(stringResource(R.string.last_error)) { Line(ui.error) }
+                }
             }
         }
         Box(modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
-            EnterUp(delayMillis = 420) {
+            EnterUp(delayMillis = 520) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -757,10 +759,15 @@ private fun BrandTitle(size: Int) {
 
 @Composable
 private fun UpdateBadge(visible: Boolean, onClick: () -> Unit) {
+    val alpha by animateFloatAsState(
+        targetValue = if (visible) 1f else 0f,
+        animationSpec = tween(560),
+        label = "update-badge",
+    )
     Text(
         "↗",
         modifier = Modifier
-            .graphicsLayer { alpha = if (visible) 1f else 0f }
+            .graphicsLayer { this.alpha = alpha }
             .clickable(enabled = visible, onClick = onClick),
         color = Accent,
         fontSize = 11.sp,

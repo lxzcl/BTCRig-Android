@@ -63,6 +63,7 @@ static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
 static pthread_t g_thread;
 static int g_thread_started = 0;
 static int g_running = 0;
+static int g_stop_joining = 0;
 static volatile int g_stop_requested = 0;
 static core_config_t g_config;
 static core_stats_t g_stats;
@@ -119,6 +120,31 @@ static void set_status(const char *status, const char *error) {
         copy_text(g_last_error, sizeof(g_last_error), error);
     }
     pthread_mutex_unlock(&g_lock);
+}
+
+static int join_core_thread_once(void) {
+    pthread_t thread;
+    int should_join = 0;
+
+    pthread_mutex_lock(&g_lock);
+    if (g_thread_started && !g_stop_joining && !pthread_equal(g_thread, pthread_self())) {
+        thread = g_thread;
+        g_stop_joining = 1;
+        should_join = 1;
+    }
+    pthread_mutex_unlock(&g_lock);
+
+    if (!should_join) {
+        return 0;
+    }
+
+    pthread_join(thread, NULL);
+
+    pthread_mutex_lock(&g_lock);
+    g_thread_started = 0;
+    g_stop_joining = 0;
+    pthread_mutex_unlock(&g_lock);
+    return 1;
 }
 
 static void build_log_path(const char *config_path, char *out, size_t out_size) {
@@ -538,9 +564,17 @@ int btcrig_core_start(const char *config_path) {
     core_config_t config = read_config(config_path);
 
     pthread_mutex_lock(&g_lock);
-    if (g_running) {
+    int stale_thread = g_thread_started && !g_running && !g_stop_joining;
+    pthread_mutex_unlock(&g_lock);
+    if (stale_thread) {
+        join_core_thread_once();
+    }
+
+    pthread_mutex_lock(&g_lock);
+    if (g_running || g_thread_started || g_stop_joining) {
+        int already_running = g_running;
         pthread_mutex_unlock(&g_lock);
-        return 1;
+        return already_running ? 1 : 0;
     }
     g_stop_requested = 0;
     g_config = config;
@@ -565,19 +599,17 @@ int btcrig_core_start(const char *config_path) {
 
 void btcrig_core_stop(void) {
     pthread_mutex_lock(&g_lock);
-    int started = g_thread_started;
     g_stop_requested = 1;
     pthread_mutex_unlock(&g_lock);
 
-    if (started) {
-        pthread_join(g_thread, NULL);
-    }
+    join_core_thread_once();
 
     pthread_mutex_lock(&g_lock);
-    g_thread_started = 0;
-    g_running = 0;
-    g_stats.connected = 0;
-    copy_text(g_status, sizeof(g_status), "stopped");
+    if (!g_thread_started && !g_stop_joining) {
+        g_running = 0;
+        g_stats.connected = 0;
+        copy_text(g_status, sizeof(g_status), "stopped");
+    }
     pthread_mutex_unlock(&g_lock);
 }
 

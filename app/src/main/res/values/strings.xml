@@ -75,6 +75,7 @@
     <string name="log_not_found">(log not found)</string>
     <string name="empty_log">(empty log)</string>
     <string name="log_read_failed">Log read failed: %1$s</string>
+    <string name="stop_failed">Stop failed: %1$s</string>
     <string name="error_hint_tls">TLS connection failed. Check certificate compatibility or the pool address.</string>
     <string name="error_hint_opencl">OpenCL is unavailable. Try disabling GPU mining or check the device OpenCL driver.</string>
     <string name="error_hint_pool">Pool connection failed. Check network, address, and port.</string>

@@ -212,7 +212,16 @@ public final class MainActivity extends Activity {
     private void stopBtcrigService() {
         Intent intent = new Intent(this, BtcrigService.class);
         intent.setAction(BtcrigService.ACTION_STOP);
-        startService(intent);
+        try {
+            startService(intent);
+        } catch (Exception e) {
+            try {
+                BtcrigNative.stop();
+            } catch (Throwable ignored) {
+            }
+            stopService(new Intent(this, BtcrigService.class));
+            Toast.makeText(this, getString(R.string.stop_failed, e.getMessage()), Toast.LENGTH_LONG).show();
+        }
         serviceState = "stopped";
         updateUi();
         scheduleRefresh();

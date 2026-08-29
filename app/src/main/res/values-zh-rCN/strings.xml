@@ -75,6 +75,7 @@
     <string name="log_not_found">（未找到日志）</string>
     <string name="empty_log">（空日志）</string>
     <string name="log_read_failed">读取日志失败：%1$s</string>
+    <string name="stop_failed">停止失败：%1$s</string>
     <string name="error_hint_tls">TLS 连接失败，请检查证书兼容开关或矿池地址。</string>
     <string name="error_hint_opencl">OpenCL 不可用，可以关闭 GPU 挖矿或检查设备 OpenCL 驱动。</string>
     <string name="error_hint_pool">矿池连接失败，请检查网络、地址和端口。</string>

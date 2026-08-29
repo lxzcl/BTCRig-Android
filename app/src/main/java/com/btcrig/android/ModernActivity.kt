@@ -259,7 +259,13 @@ class ModernActivity : ComponentActivity() {
     }
 
     private fun stopBtcrigService() {
-        startService(Intent(this, BtcrigService::class.java).setAction(BtcrigService.ACTION_STOP))
+        runCatching {
+            startService(Intent(this, BtcrigService::class.java).setAction(BtcrigService.ACTION_STOP))
+        }.onFailure { error ->
+            runCatching { BtcrigNative.stop() }
+            stopService(Intent(this, BtcrigService::class.java))
+            toast(getString(R.string.stop_failed, error.message ?: error.javaClass.simpleName))
+        }
     }
 
     private fun readUi(): UiState {

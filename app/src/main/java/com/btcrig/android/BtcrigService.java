@@ -22,7 +22,7 @@ public final class BtcrigService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
-            BtcrigNative.stop();
+            safeStopCore();
             releaseWakeLock();
             stopSelf();
             return START_NOT_STICKY;
@@ -54,9 +54,16 @@ public final class BtcrigService extends Service {
 
     @Override
     public void onDestroy() {
-        BtcrigNative.stop();
+        safeStopCore();
         releaseWakeLock();
         super.onDestroy();
+    }
+
+    private void safeStopCore() {
+        try {
+            BtcrigNative.stop();
+        } catch (Throwable ignored) {
+        }
     }
 
     private void acquireWakeLock() {

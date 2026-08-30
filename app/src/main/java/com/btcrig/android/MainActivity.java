@@ -414,7 +414,7 @@ public final class MainActivity extends Activity {
         benchmarkStatus.setText("Benchmark: running " + threads + " threads");
 
         new Thread(() -> {
-            double hps = BtcrigNative.benchmarkCpu(2, threads);
+            double hps = BtcrigNative.benchmarkCpu(3, threads);
             runOnUiThread(() -> {
                 benchmarkButton.setEnabled(true);
                 benchmarkStatus.setText("Benchmark: " + formatHashrate(hps) + " / " + threads + " threads");

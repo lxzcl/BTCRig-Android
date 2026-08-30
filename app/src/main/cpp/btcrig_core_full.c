@@ -18,6 +18,7 @@
 
 #define CORE_LOG_MAX_BYTES (1024 * 1024)
 #define BENCHMARK_DIFFICULTY 100000.0
+#define BENCHMARK_WARMUP_SECONDS 1
 #define DONATION_CYCLE_MINUTES 100
 #define DONATION_USER "bc1qqz0wutk9kk5mmaf7fu4dm5w4fq4fhaah9hpzr3"
 
@@ -712,6 +713,14 @@ static void prepare_benchmark_job(miner_job_t *job) {
     miner_target_from_difficulty(BENCHMARK_DIFFICULTY, job->target);
 }
 
+static void sleep_seconds(int seconds) {
+    struct timespec ts;
+    ts.tv_sec = seconds;
+    ts.tv_nsec = 0;
+    while (nanosleep(&ts, &ts) != 0 && errno == EINTR) {
+    }
+}
+
 double btcrig_core_benchmark_cpu(int seconds, int threads) {
     if (seconds < 1) {
         seconds = 1;
@@ -730,14 +739,13 @@ double btcrig_core_benchmark_cpu(int seconds, int threads) {
     prepare_benchmark_job(&job);
     miner_set_job(miner, &job);
 
-    struct timespec ts;
-    ts.tv_sec = seconds;
-    ts.tv_nsec = 0;
-    nanosleep(&ts, NULL);
+    sleep_seconds(BENCHMARK_WARMUP_SECONDS);
+    uint64_t base_hashes = miner_hashes(miner);
+    sleep_seconds(seconds);
 
     uint64_t hashes = miner_hashes(miner);
     miner_destroy(miner);
-    return (double)hashes / (double)seconds;
+    return (double)(hashes - base_hashes) / (double)seconds;
 }
 
 double btcrig_core_benchmark_cpu_backend(const char *backend, int seconds, int threads) {
@@ -779,14 +787,13 @@ double btcrig_core_benchmark_opencl(const char *config_path, int seconds) {
     prepare_benchmark_job(&job);
     miner_set_job(miner, &job);
 
-    struct timespec ts;
-    ts.tv_sec = seconds;
-    ts.tv_nsec = 0;
-    nanosleep(&ts, NULL);
+    sleep_seconds(BENCHMARK_WARMUP_SECONDS);
+    uint64_t base_hashes = miner_hashes(miner);
+    sleep_seconds(seconds);
 
     uint64_t hashes = miner_hashes(miner);
     miner_destroy(miner);
-    return (double)hashes / (double)seconds;
+    return (double)(hashes - base_hashes) / (double)seconds;
 #else
     (void)config_path;
     (void)seconds;

@@ -190,13 +190,13 @@ class ModernActivity : ComponentActivity() {
                                 runOnUiThread {
                                     benchmark = (lines + getString(R.string.benchmark_backend_value, backend, testing)).joinToString("\n")
                                 }
-                                val hps = BtcrigNative.benchmarkCpuBackend(backend, 1, threads)
+                                val hps = BtcrigNative.benchmarkCpuBackend(backend, BENCHMARK_SECONDS, threads)
                                 lines.add(getString(R.string.benchmark_backend_value, backend, if (hps >= 0.0) formatHashrate(hps) else unavailable))
                             }
                             runOnUiThread {
                                 benchmark = (lines + getString(R.string.benchmark_backend_value, "opencl", testing)).joinToString("\n")
                             }
-                            val openclHps = BtcrigNative.benchmarkOpencl(configPath, 1)
+                            val openclHps = BtcrigNative.benchmarkOpencl(configPath, BENCHMARK_SECONDS)
                             lines.add(getString(R.string.benchmark_backend_value, "opencl", if (openclHps >= 0.0) formatHashrate(openclHps) else unavailable))
                             runOnUiThread {
                                 benchmarking = false
@@ -488,6 +488,7 @@ private val SoftBlue = Color(0xFFE8EDF8)
 private val CardFill = Color(0xFFEFF1F7)
 private val FieldFill = Color.Transparent
 private val CPU_BACKENDS = listOf("openssl", "fast-c", "arm-sha2", "x86-sha-ni")
+private const val BENCHMARK_SECONDS = 3
 private val DONATION_LEVELS = listOf(0, 1, 3, 5, 99)
 private const val UPDATE_API_URL = "https://api.github.com/repos/lxzcl/BTCRig-Android/releases/latest"
 private const val UPDATE_RELEASE_URL = "https://github.com/lxzcl/BTCRig-Android/releases/latest"

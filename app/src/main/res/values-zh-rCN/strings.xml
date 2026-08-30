@@ -15,7 +15,7 @@
     <string name="last_error">最近错误</string>
     <string name="recent_error">最近错误</string>
     <string name="no_recent_errors">暂无最近错误</string>
-    <string name="page_subtitle">Android 挖矿外壳 · CPU / OpenCL</string>
+    <string name="page_subtitle">原生 CPU / OpenCL 挖矿</string>
     <string name="settings_title">设置</string>
     <string name="pool_url">矿池地址</string>
     <string name="user_worker">用户 / worker</string>

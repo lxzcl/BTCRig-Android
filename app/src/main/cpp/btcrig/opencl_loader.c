@@ -17,7 +17,6 @@ typedef void *opencl_symbol_t;
 
 typedef struct {
     opencl_library_t library;
-    int attempted;
     int loaded;
     char error[256];
     btcrig_opencl_api_t api;
@@ -78,49 +77,6 @@ static int try_open_library(const char *name) {
     return g_opencl.library != NULL ? 0 : -1;
 }
 
-static int open_library(void) {
-    const char *override = getenv("BTCRIG_OPENCL_LIBRARY");
-    if (try_open_library(override) == 0) {
-        return 0;
-    }
-#if defined(_WIN32)
-    try_open_library("OpenCL.dll");
-#elif defined(__APPLE__)
-    if (try_open_library("/System/Library/Frameworks/OpenCL.framework/OpenCL") != 0) {
-        try_open_library("OpenCL.framework/OpenCL");
-    }
-#else
-#if defined(__ANDROID__)
-    if (try_open_library("libOpenCL.so") == 0) {
-        return 0;
-    }
-    static const char *const android_opencl_names[] = {
-        "/system_ext/lib64/libOpenCL_system.so",
-        "/system_ext/lib/libOpenCL_system.so",
-        "/vendor/lib64/libOpenCL.so",
-        "/vendor/lib/libOpenCL.so",
-        "/system/vendor/lib64/libOpenCL.so",
-        "/system/vendor/lib/libOpenCL.so",
-        NULL
-    };
-    for (int i = 0; g_opencl.library == NULL && android_opencl_names[i] != NULL; ++i) {
-        try_open_library(android_opencl_names[i]);
-    }
-#else
-    if (g_opencl.library == NULL && try_open_library("libOpenCL.so.1") != 0) {
-        try_open_library("libOpenCL.so");
-    }
-#endif
-#endif
-    if (g_opencl.library == NULL) {
-        if (g_opencl.error[0] == '\0') {
-            set_loader_error("OpenCL runtime library not found");
-        }
-        return -1;
-    }
-    return 0;
-}
-
 static void close_library(void) {
     if (g_opencl.library == NULL) {
         return;
@@ -150,30 +106,13 @@ static opencl_symbol_t load_symbol(const char *name) {
         char message__[256]; \
         snprintf(message__, sizeof(message__), "OpenCL runtime is missing required symbol " #name); \
         set_loader_error(message__); \
-        close_library(); \
         memset(&g_opencl.api, 0, sizeof(g_opencl.api)); \
-        copy_error(error, error_size); \
         return -1; \
     } \
     memcpy(&g_opencl.api.name, &symbol__, sizeof(g_opencl.api.name)); \
 } while (0)
 
-int btcrig_opencl_load(char *error, size_t error_size) {
-    if (g_opencl.loaded) {
-        clear_error(error, error_size);
-        return 0;
-    }
-    if (g_opencl.attempted) {
-        copy_error(error, error_size);
-        return -1;
-    }
-
-    g_opencl.attempted = 1;
-    if (open_library() != 0) {
-        copy_error(error, error_size);
-        return -1;
-    }
-
+static int load_required_symbols(void) {
     LOAD_OPENCL_SYMBOL(clGetPlatformIDs);
     LOAD_OPENCL_SYMBOL(clGetDeviceIDs);
     LOAD_OPENCL_SYMBOL(clGetDeviceInfo);
@@ -193,6 +132,87 @@ int btcrig_opencl_load(char *error, size_t error_size) {
     LOAD_OPENCL_SYMBOL(clSetKernelArg);
     LOAD_OPENCL_SYMBOL(clEnqueueNDRangeKernel);
     LOAD_OPENCL_SYMBOL(clEnqueueReadBuffer);
+    return 0;
+}
+
+static int try_load_library(const char *name) {
+    if (try_open_library(name) != 0) {
+        return -1;
+    }
+    memset(&g_opencl.api, 0, sizeof(g_opencl.api));
+    if (load_required_symbols() == 0) {
+        return 0;
+    }
+    close_library();
+    return -1;
+}
+
+static int open_library(void) {
+    const char *override = getenv("BTCRIG_OPENCL_LIBRARY");
+    if (try_load_library(override) == 0) {
+        return 0;
+    }
+#if defined(_WIN32)
+    try_load_library("OpenCL.dll");
+#elif defined(__APPLE__)
+    if (try_load_library("/System/Library/Frameworks/OpenCL.framework/OpenCL") != 0) {
+        try_load_library("OpenCL.framework/OpenCL");
+    }
+#else
+#if defined(__ANDROID__)
+    static const char *const android_opencl_names[] = {
+        "libOpenCL.so",
+        "libOpenCL.so.1",
+        "libOpenCL_system.so",
+        "libGLES_mali.so",
+        "libPVROCL.so",
+        "/system_ext/lib64/libOpenCL.so",
+        "/system_ext/lib/libOpenCL.so",
+        "/system_ext/lib64/libOpenCL_system.so",
+        "/system_ext/lib/libOpenCL_system.so",
+        "/vendor/lib64/libOpenCL.so",
+        "/vendor/lib/libOpenCL.so",
+        "/vendor/lib64/egl/libGLES_mali.so",
+        "/vendor/lib/egl/libGLES_mali.so",
+        "/vendor/lib64/libPVROCL.so",
+        "/vendor/lib/libPVROCL.so",
+        "/odm/lib64/libOpenCL.so",
+        "/odm/lib/libOpenCL.so",
+        "/product/lib64/libOpenCL.so",
+        "/product/lib/libOpenCL.so",
+        "/system/vendor/lib64/libOpenCL.so",
+        "/system/vendor/lib/libOpenCL.so",
+        "/system/lib64/egl/libGLES_mali.so",
+        "/system/lib/egl/libGLES_mali.so",
+        NULL
+    };
+    for (int i = 0; g_opencl.library == NULL && android_opencl_names[i] != NULL; ++i) {
+        try_load_library(android_opencl_names[i]);
+    }
+#else
+    if (g_opencl.library == NULL && try_load_library("libOpenCL.so.1") != 0) {
+        try_load_library("libOpenCL.so");
+    }
+#endif
+#endif
+    if (g_opencl.library == NULL) {
+        if (g_opencl.error[0] == '\0') {
+            set_loader_error("OpenCL runtime library not found");
+        }
+        return -1;
+    }
+    return 0;
+}
+
+int btcrig_opencl_load(char *error, size_t error_size) {
+    if (g_opencl.loaded) {
+        clear_error(error, error_size);
+        return 0;
+    }
+    if (open_library() != 0) {
+        copy_error(error, error_size);
+        return -1;
+    }
 
     g_opencl.loaded = 1;
     g_opencl.error[0] = '\0';

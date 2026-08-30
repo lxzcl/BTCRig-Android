@@ -727,19 +727,23 @@ private fun HomePage(
 
 @Composable
 private fun PageHeader() {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        BrandTitle(42)
-        Text(stringResource(R.string.page_subtitle), color = MaterialTheme.colorScheme.secondary)
-    }
+    BrandTitle(42)
 }
 
 @Composable
 private fun BrandHeader(version: String, update: UpdateState, onOpenUpdate: () -> Unit) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            UpdateBadge(false, onOpenUpdate)
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(999.dp))
+                .clickable(enabled = update.available, onClick = onOpenUpdate)
+                .padding(horizontal = 4.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            UpdateBadge(false)
             Text("v$version", color = MaterialTheme.colorScheme.secondary, fontSize = 13.sp)
-            UpdateBadge(update.available, onOpenUpdate)
+            UpdateBadge(update.available)
         }
         BrandTitle(18)
     }
@@ -758,21 +762,25 @@ private fun BrandTitle(size: Int) {
 }
 
 @Composable
-private fun UpdateBadge(visible: Boolean, onClick: () -> Unit) {
-    val alpha by animateFloatAsState(
-        targetValue = if (visible) 1f else 0f,
-        animationSpec = tween(560),
-        label = "update-badge",
+private fun UpdateBadge(visible: Boolean) {
+    val transition = rememberInfiniteTransition(label = "update-badge")
+    val pulse by transition.animateFloat(
+        initialValue = 0.68f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(animation = tween(1100), repeatMode = RepeatMode.Reverse),
+        label = "update-badge-pulse",
     )
-    Text(
-        "↗",
+    Box(
         modifier = Modifier
-            .graphicsLayer { this.alpha = alpha }
-            .clickable(enabled = visible, onClick = onClick),
-        color = Accent,
-        fontSize = 11.sp,
-        fontWeight = FontWeight.Bold,
-    )
+            .width(36.dp)
+            .height(18.dp)
+            .graphicsLayer { alpha = if (visible) pulse else 0f }
+            .clip(RoundedCornerShape(999.dp))
+            .background(SoftBlue),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text("NEW", color = Accent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+    }
 }
 
 @Composable

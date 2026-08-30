@@ -908,61 +908,13 @@ static int opencl_version_at_least(const char *text, int major, int minor) {
     return parsed_major > major || (parsed_major == major && parsed_minor >= minor);
 }
 
-static int extension_list_has(const char *extensions, const char *needle) {
-    if (extensions == NULL || needle == NULL || needle[0] == '\0') {
-        return 0;
-    }
-
-    size_t needle_len = strlen(needle);
-    const char *p = extensions;
-
-    while ((p = strstr(p, needle)) != NULL) {
-        int left_ok = p == extensions || p[-1] == ' ';
-        char right = p[needle_len];
-        int right_ok = right == '\0' || right == ' ';
-        if (left_ok && right_ok) {
-            return 1;
-        }
-        p += needle_len;
-    }
-    return 0;
-}
-
-static int device_has_extension(cl_device_id device, const char *needle) {
-    size_t size = 0;
-    if (clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, 0, NULL, &size) != CL_SUCCESS || size == 0) {
-        return 0;
-    }
-
-    char *extensions = malloc(size);
-    if (extensions == NULL) {
-        return 0;
-    }
-    if (clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, size, extensions, NULL) != CL_SUCCESS) {
-        free(extensions);
-        return 0;
-    }
-
-    int found = extension_list_has(extensions, needle);
-    free(extensions);
-    return found;
-}
-
 static int validate_compat10_device(cl_device_id device,
                                     const char *device_version,
                                     char *error,
                                     size_t error_size) {
+    (void)device;
     if (!opencl_version_at_least(device_version, 1, 0)) {
         set_error(error, error_size, "selected OpenCL device did not report a usable OpenCL 1.x version", CL_SUCCESS);
-        return -1;
-    }
-
-    if (!opencl_version_at_least(device_version, 1, 1) &&
-        !device_has_extension(device, "cl_khr_global_int32_base_atomics")) {
-        set_error(error,
-                  error_size,
-                  "compat10 backend requires OpenCL 1.1+ or cl_khr_global_int32_base_atomics",
-                  CL_SUCCESS);
         return -1;
     }
 
@@ -1175,59 +1127,65 @@ int opencl_miner_resolve_devices(const miner_opencl_config_t *config,
     }
 
     int found = 0;
-    for (cl_uint p = 0; p < platform_count && found < max_devices; ++p) {
-        cl_uint device_count = 0;
-        rc = clGetDeviceIDs(platforms[p], CL_DEVICE_TYPE_ALL, 0, NULL, &device_count);
-        if (rc != CL_SUCCESS || device_count == 0) {
-            continue;
+    for (int pass = 0; pass < 2 && found < max_devices; ++pass) {
+        if (pass == 1 && found > 0) {
+            break;
         }
+        for (cl_uint p = 0; p < platform_count && found < max_devices; ++p) {
+            cl_uint device_count = 0;
+            rc = clGetDeviceIDs(platforms[p], CL_DEVICE_TYPE_ALL, 0, NULL, &device_count);
+            if (rc != CL_SUCCESS || device_count == 0) {
+                continue;
+            }
 
-        cl_device_id *devices = calloc(device_count, sizeof(*devices));
-        if (devices == NULL) {
-            free(platforms);
-            set_error(error, error_size, "OpenCL device allocation failed", CL_SUCCESS);
-            return -1;
-        }
+            cl_device_id *devices = calloc(device_count, sizeof(*devices));
+            if (devices == NULL) {
+                free(platforms);
+                set_error(error, error_size, "OpenCL device allocation failed", CL_SUCCESS);
+                return -1;
+            }
 
-        rc = clGetDeviceIDs(platforms[p], CL_DEVICE_TYPE_ALL, device_count, devices, NULL);
-        if (rc != CL_SUCCESS) {
+            rc = clGetDeviceIDs(platforms[p], CL_DEVICE_TYPE_ALL, device_count, devices, NULL);
+            if (rc != CL_SUCCESS) {
+                free(devices);
+                continue;
+            }
+
+            for (cl_uint d = 0; d < device_count && found < max_devices; ++d) {
+                cl_device_type type = 0;
+                if (clGetDeviceInfo(devices[d], CL_DEVICE_TYPE, sizeof(type), &type, NULL) != CL_SUCCESS) {
+                    continue;
+                }
+                int is_gpu = (type & CL_DEVICE_TYPE_GPU) != 0;
+                if ((pass == 0 && !is_gpu) || (pass == 1 && is_gpu)) {
+                    continue;
+                }
+
+                devices_out[found].platform = (int)p;
+                devices_out[found].device = (int)d;
+                devices_out[found].batch_size = config_u32_or(config->batch_size, OPENCL_DEFAULT_BATCH_SIZE);
+                devices_out[found].local_work_size = config->local_work_size;
+                devices_out[found].nonces_per_work_item = clamp_nonces_per_work_item(config->nonces_per_work_item);
+                devices_out[found].max_results = config_u32_or(config->max_results, OPENCL_DEFAULT_MAX_RESULTS);
+                devices_out[found].backend_variant = normalize_backend_variant(config->backend_variant);
+                devices_out[found].kernel_variant = normalize_kernel_variant(config->kernel_variant);
+                char name[128] = "";
+                char vendor[128] = "";
+                char version[128] = "";
+                (void)clGetDeviceInfo(devices[d], CL_DEVICE_NAME, sizeof(name), name, NULL);
+                (void)clGetDeviceInfo(devices[d], CL_DEVICE_VENDOR, sizeof(vendor), vendor, NULL);
+                (void)clGetDeviceInfo(devices[d], CL_DEVICE_VERSION, sizeof(version), version, NULL);
+                apply_legacy_noatomic_device_info(&devices_out[found], vendor, name, version);
+                ++found;
+            }
+
             free(devices);
-            continue;
         }
-
-        for (cl_uint d = 0; d < device_count && found < max_devices; ++d) {
-            cl_device_type type = 0;
-            if (clGetDeviceInfo(devices[d], CL_DEVICE_TYPE, sizeof(type), &type, NULL) != CL_SUCCESS) {
-                continue;
-            }
-            if ((type & CL_DEVICE_TYPE_GPU) == 0) {
-                continue;
-            }
-
-            devices_out[found].platform = (int)p;
-            devices_out[found].device = (int)d;
-            devices_out[found].batch_size = config_u32_or(config->batch_size, OPENCL_DEFAULT_BATCH_SIZE);
-            devices_out[found].local_work_size = config->local_work_size;
-            devices_out[found].nonces_per_work_item = clamp_nonces_per_work_item(config->nonces_per_work_item);
-            devices_out[found].max_results = config_u32_or(config->max_results, OPENCL_DEFAULT_MAX_RESULTS);
-            devices_out[found].backend_variant = normalize_backend_variant(config->backend_variant);
-            devices_out[found].kernel_variant = normalize_kernel_variant(config->kernel_variant);
-            char name[128] = "";
-            char vendor[128] = "";
-            char version[128] = "";
-            (void)clGetDeviceInfo(devices[d], CL_DEVICE_NAME, sizeof(name), name, NULL);
-            (void)clGetDeviceInfo(devices[d], CL_DEVICE_VENDOR, sizeof(vendor), vendor, NULL);
-            (void)clGetDeviceInfo(devices[d], CL_DEVICE_VERSION, sizeof(version), version, NULL);
-            apply_legacy_noatomic_device_info(&devices_out[found], vendor, name, version);
-            ++found;
-        }
-
-        free(devices);
     }
 
     free(platforms);
     if (found == 0) {
-        set_error(error, error_size, "no OpenCL GPU devices found", CL_SUCCESS);
+        set_error(error, error_size, "no usable OpenCL devices found", CL_SUCCESS);
         return -1;
     }
     return found;
@@ -1242,6 +1200,9 @@ static const char *opencl_device_type_name(cl_device_type type) {
     }
     if ((type & CL_DEVICE_TYPE_ACCELERATOR) != 0) {
         return "accelerator";
+    }
+    if ((type & CL_DEVICE_TYPE_DEFAULT) != 0) {
+        return "default";
     }
     return "unknown";
 }
@@ -1267,7 +1228,7 @@ int opencl_miner_describe_devices(const miner_opencl_config_t *config,
         append_text(out,
                     out_size,
                     "Config: enabled\nRuntime: unavailable\nMode: CPU only\nReason: %s",
-                    error[0] != '\0' ? error : "no usable OpenCL GPU devices");
+                    error[0] != '\0' ? error : "no usable OpenCL devices");
         return 0;
     }
 
@@ -1565,14 +1526,27 @@ opencl_miner_t *opencl_miner_create(const miner_opencl_config_t *config,
 
     if (build_program(miner, error, error_size) != 0) {
         if (requested_kernel_variant == MINER_OPENCL_KERNEL_AUTO &&
-            miner->kernel_variant == MINER_OPENCL_KERNEL_UNROLLED) {
-            release_program_objects(miner);
-            miner->kernel_variant = MINER_OPENCL_KERNEL_COMPACT;
-            if (error != NULL && error_size > 0) {
-                error[0] = '\0';
-            }
-            if (build_program(miner, error, error_size) == 0) {
-                goto program_built;
+            miner->kernel_variant != MINER_OPENCL_KERNEL_LEGACY_NOATOMIC) {
+            const int fallbacks[] = {
+                MINER_OPENCL_KERNEL_COMPACT,
+                MINER_OPENCL_KERNEL_LEGACY_NOATOMIC
+            };
+            for (size_t i = 0; i < sizeof(fallbacks) / sizeof(fallbacks[0]); ++i) {
+                if (miner->kernel_variant == fallbacks[i]) {
+                    continue;
+                }
+                release_program_objects(miner);
+                miner->kernel_variant = fallbacks[i];
+                if (miner->kernel_variant == MINER_OPENCL_KERNEL_LEGACY_NOATOMIC &&
+                    miner->batch_size > OPENCL_LEGACY_NOATOMIC_MAX_BATCH_SIZE) {
+                    miner->batch_size = OPENCL_LEGACY_NOATOMIC_MAX_BATCH_SIZE;
+                }
+                if (error != NULL && error_size > 0) {
+                    error[0] = '\0';
+                }
+                if (build_program(miner, error, error_size) == 0) {
+                    goto program_built;
+                }
             }
         }
         opencl_miner_destroy(miner);

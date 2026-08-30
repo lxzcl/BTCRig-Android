@@ -1,6 +1,6 @@
 # BTCRig Android
 
-Android app shell for BTCRig with native CPU/OpenCL mining support.
+Android BTCRig app with native CPU/OpenCL mining support.
 
 ## Status
 

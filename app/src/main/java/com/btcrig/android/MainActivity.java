@@ -87,7 +87,7 @@ public final class MainActivity extends Activity {
         title.setTypeface(Typeface.DEFAULT_BOLD);
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("Android miner shell · CPU / OpenCL");
+        subtitle.setText("Native CPU / OpenCL miner");
         subtitle.setTextColor(MUTED);
         subtitle.setTextSize(15);
 

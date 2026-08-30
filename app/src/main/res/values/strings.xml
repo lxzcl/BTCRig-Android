@@ -15,7 +15,7 @@
     <string name="last_error">Last error</string>
     <string name="recent_error">Recent error</string>
     <string name="no_recent_errors">No recent errors</string>
-    <string name="page_subtitle">Android miner shell · CPU / OpenCL</string>
+    <string name="page_subtitle">Native CPU / OpenCL miner</string>
     <string name="settings_title">Settings</string>
     <string name="pool_url">Pool URL</string>
     <string name="user_worker">User / worker</string>

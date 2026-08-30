@@ -13,6 +13,15 @@
         <uses-native-library
             android:name="libOpenCL.so"
             android:required="false" />
+        <uses-native-library
+            android:name="libOpenCL_system.so"
+            android:required="false" />
+        <uses-native-library
+            android:name="libGLES_mali.so"
+            android:required="false" />
+        <uses-native-library
+            android:name="libPVROCL.so"
+            android:required="false" />
 
         <activity
             android:name=".ModernActivity"

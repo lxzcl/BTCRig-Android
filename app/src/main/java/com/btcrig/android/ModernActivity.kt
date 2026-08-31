@@ -35,6 +35,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -729,7 +730,11 @@ private fun HomePage(
                     contentAlignment = Alignment.Center,
                 ) {
                     HeroGlow(ui.running)
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(18.dp)) {
+                    Column(
+                        modifier = Modifier.offset(y = (-18).dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(18.dp),
+                    ) {
                         Box(modifier = Modifier.height(74.dp))
                         HashrateText(ui.hashrate)
                     }
@@ -828,7 +833,7 @@ private fun UpdateBadge(visible: Boolean) {
             .background(SoftBlue),
         contentAlignment = Alignment.Center,
     ) {
-        Text("NEW", color = Accent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+        Text("NEW", modifier = Modifier.offset(y = (-1).dp), color = Accent, fontSize = 9.sp, fontWeight = FontWeight.Bold)
     }
 }
 

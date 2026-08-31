@@ -69,7 +69,10 @@
     <string name="stratum_stopped">Stratum: stopped</string>
     <string name="shares_running">Shares: %1$d submit / %2$d ok / %3$d reject</string>
     <string name="shares_empty">Shares: --</string>
+    <string name="benchmark_duration_value">Each run: 1s warmup + %1$ds measure</string>
     <string name="cpu_full_cores_value">CPU full cores: %1$s</string>
+    <string name="cpu_recommended_value">CPU recommended: %1$s</string>
+    <string name="benchmark_cpu_thread_label">%1$s %2$dT</string>
     <string name="benchmark_backend_value">%1$s: %2$s</string>
     <string name="testing">testing...</string>
     <string name="opencl_label">OpenCL</string>

@@ -69,7 +69,10 @@
     <string name="stratum_stopped">Stratum：已停止</string>
     <string name="shares_running">份额：提交 %1$d / 接受 %2$d / 拒绝 %3$d</string>
     <string name="shares_empty">份额：--</string>
+    <string name="benchmark_duration_value">每项：1 秒预热 + %1$d 秒统计</string>
     <string name="cpu_full_cores_value">CPU 全核：%1$s</string>
+    <string name="cpu_recommended_value">CPU 推荐：%1$s</string>
+    <string name="benchmark_cpu_thread_label">%1$s %2$d 线程</string>
     <string name="benchmark_backend_value">%1$s：%2$s</string>
     <string name="testing">测试中...</string>
     <string name="opencl_label">OpenCL</string>

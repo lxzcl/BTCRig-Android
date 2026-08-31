@@ -180,19 +180,35 @@ class ModernActivity : ComponentActivity() {
                         benchmarking = true
                         val configPath = runCatching { BtcrigConfig.ensure(this).absolutePath }.getOrDefault("")
                         val threads = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+                        val threadCounts = benchmarkThreadCounts(threads)
                         val benchmarkTitle = getString(R.string.benchmark)
+                        val benchmarkDuration = getString(R.string.benchmark_duration_value, BENCHMARK_SECONDS)
                         val cpuFullCores = getString(R.string.cpu_full_cores_value, threads.toString())
+                        val cpuRecommendedPending = getString(R.string.cpu_recommended_value, "--")
                         val testing = getString(R.string.testing)
                         val unavailable = getString(R.string.unavailable)
                         Thread {
-                            val lines = mutableListOf(benchmarkTitle, cpuFullCores, "")
+                            val lines = mutableListOf(benchmarkTitle, benchmarkDuration, cpuFullCores, cpuRecommendedPending, "")
+                            var bestLabel = ""
+                            var bestHps = -1.0
                             for (backend in CPU_BACKENDS) {
-                                runOnUiThread {
-                                    benchmark = (lines + getString(R.string.benchmark_backend_value, backend, testing)).joinToString("\n")
+                                for (count in threadCounts) {
+                                    val label = getString(R.string.benchmark_cpu_thread_label, backend, count)
+                                    runOnUiThread {
+                                        benchmark = (lines + getString(R.string.benchmark_backend_value, label, testing)).joinToString("\n")
+                                    }
+                                    val hps = BtcrigNative.benchmarkCpuBackend(backend, BENCHMARK_SECONDS, count)
+                                    if (hps > bestHps) {
+                                        bestLabel = label
+                                        bestHps = hps
+                                    }
+                                    lines.add(getString(R.string.benchmark_backend_value, label, if (hps >= 0.0) formatHashrate(hps) else unavailable))
                                 }
-                                val hps = BtcrigNative.benchmarkCpuBackend(backend, BENCHMARK_SECONDS, threads)
-                                lines.add(getString(R.string.benchmark_backend_value, backend, if (hps >= 0.0) formatHashrate(hps) else unavailable))
                             }
+                            lines[3] = getString(
+                                R.string.cpu_recommended_value,
+                                if (bestHps >= 0.0) "${bestLabel} / ${formatHashrate(bestHps)}" else unavailable
+                            )
                             runOnUiThread {
                                 benchmark = (lines + getString(R.string.benchmark_backend_value, "opencl", testing)).joinToString("\n")
                             }
@@ -411,8 +427,12 @@ class ModernActivity : ComponentActivity() {
     }
 
     private fun defaultBenchmarkText(): String =
-        (listOf(getString(R.string.benchmark), getString(R.string.cpu_full_cores_value, "--"), "") +
-            CPU_BACKENDS.map { getString(R.string.benchmark_backend_value, it, "--") } +
+        (listOf(getString(R.string.benchmark), getString(R.string.benchmark_duration_value, BENCHMARK_SECONDS), getString(R.string.cpu_full_cores_value, "--"), getString(R.string.cpu_recommended_value, "--"), "") +
+            CPU_BACKENDS.flatMap { backend ->
+                benchmarkThreadCounts(Runtime.getRuntime().availableProcessors().coerceAtLeast(1)).map {
+                    getString(R.string.benchmark_backend_value, getString(R.string.benchmark_cpu_thread_label, backend, it), "--")
+                }
+            } +
             getString(R.string.benchmark_backend_value, "opencl", "--")).joinToString("\n")
 
     private fun cpuSummary(): String {
@@ -492,6 +512,9 @@ private const val BENCHMARK_SECONDS = 3
 private val DONATION_LEVELS = listOf(0, 1, 3, 5, 99)
 private const val UPDATE_API_URL = "https://api.github.com/repos/lxzcl/BTCRig-Android/releases/latest"
 private const val UPDATE_RELEASE_URL = "https://github.com/lxzcl/BTCRig-Android/releases/latest"
+
+private fun benchmarkThreadCounts(max: Int): List<Int> =
+    listOf(1, 2, 4, max - 2, max).filter { it in 1..max }.distinct()
 private const val UPDATE_CACHE_MS = 6 * 60 * 60 * 1000L
 
 @Composable

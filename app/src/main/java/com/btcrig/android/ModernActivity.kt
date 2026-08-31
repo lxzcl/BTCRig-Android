@@ -8,6 +8,8 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
@@ -158,6 +160,7 @@ class ModernActivity : ComponentActivity() {
                     onOpenUpdate = { openRelease(update) },
                     onStart = {
                         if (startBtcrigService()) {
+                            setServiceExpectedRunning(true)
                             serviceState = "running"
                             ui = readUi().copy(running = true, service = "running")
                             refreshSoon()
@@ -167,6 +170,7 @@ class ModernActivity : ComponentActivity() {
                         }
                     },
                     onStop = {
+                        setServiceExpectedRunning(false)
                         stopBtcrigService()
                         serviceState = "stopped"
                         ui = readUi().copy(running = false, service = "stopped")
@@ -180,40 +184,27 @@ class ModernActivity : ComponentActivity() {
                         benchmarking = true
                         val configPath = runCatching { BtcrigConfig.ensure(this).absolutePath }.getOrDefault("")
                         val threads = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
-                        val threadCounts = benchmarkThreadCounts(threads)
                         val benchmarkTitle = getString(R.string.benchmark)
                         val benchmarkDuration = getString(R.string.benchmark_duration_value, BENCHMARK_SECONDS)
                         val cpuFullCores = getString(R.string.cpu_full_cores_value, threads.toString())
-                        val cpuRecommendedPending = getString(R.string.cpu_recommended_value, "--")
                         val testing = getString(R.string.testing)
                         val unavailable = getString(R.string.unavailable)
                         Thread {
-                            val lines = mutableListOf(benchmarkTitle, benchmarkDuration, cpuFullCores, cpuRecommendedPending, "")
-                            var bestLabel = ""
-                            var bestHps = -1.0
-                            for (backend in CPU_BACKENDS) {
-                                for (count in threadCounts) {
-                                    val label = getString(R.string.benchmark_cpu_thread_label, backend, count)
-                                    runOnUiThread {
-                                        benchmark = (lines + getString(R.string.benchmark_backend_value, label, testing)).joinToString("\n")
-                                    }
-                                    val hps = BtcrigNative.benchmarkCpuBackend(backend, BENCHMARK_SECONDS, count)
-                                    if (hps > bestHps) {
-                                        bestLabel = label
-                                        bestHps = hps
-                                    }
-                                    lines.add(getString(R.string.benchmark_backend_value, label, if (hps >= 0.0) formatHashrate(hps) else unavailable))
+                            val lines = mutableListOf(benchmarkTitle, benchmarkDuration, cpuFullCores, "")
+                            fun showTesting(label: String) {
+                                runOnUiThread {
+                                    benchmark = (lines + getString(R.string.benchmark_backend_value, label, testing)).joinToString("\n")
                                 }
                             }
-                            lines[3] = getString(
-                                R.string.cpu_recommended_value,
-                                if (bestHps >= 0.0) "${bestLabel} / ${formatHashrate(bestHps)}" else unavailable
-                            )
-                            runOnUiThread {
-                                benchmark = (lines + getString(R.string.benchmark_backend_value, "opencl", testing)).joinToString("\n")
-                            }
-                            val openclHps = BtcrigNative.benchmarkOpencl(configPath, BENCHMARK_SECONDS)
-                            lines.add(getString(R.string.benchmark_backend_value, "opencl", if (openclHps >= 0.0) formatHashrate(openclHps) else unavailable))
+                            showTesting("CPU")
+                            val cpuHps = BtcrigNative.benchmarkCpu(BENCHMARK_SECONDS, threads)
+                            lines.add(getString(R.string.benchmark_backend_value, "CPU", if (cpuHps >= 0.0) formatHashrate(cpuHps) else unavailable))
+                            showTesting("GPU")
+                            val gpuHps = BtcrigNative.benchmarkOpencl(configPath, BENCHMARK_SECONDS)
+                            lines.add(getString(R.string.benchmark_backend_value, "GPU", if (gpuHps >= 0.0) formatHashrate(gpuHps) else unavailable))
+                            showTesting("CPU + GPU")
+                            val cpuGpuHps = if (gpuHps >= 0.0) BtcrigNative.benchmarkCpuGpu(configPath, BENCHMARK_SECONDS, threads) else -1.0
+                            lines.add(getString(R.string.benchmark_backend_value, "CPU + GPU", if (cpuGpuHps >= 0.0) formatHashrate(cpuGpuHps) else unavailable))
                             runOnUiThread {
                                 benchmarking = false
                                 benchmark = lines.joinToString("\n")
@@ -222,6 +213,7 @@ class ModernActivity : ComponentActivity() {
                     },
                     basic = basic,
                     onBasicChange = { saveBasic(it) },
+                    onBatteryOptimization = { requestIgnoreBatteryOptimizations() },
                     onJson = { showJson = true },
                     onLog = {
                         logText = readLogText()
@@ -305,6 +297,7 @@ class ModernActivity : ComponentActivity() {
 
     private fun readUi(): UiState {
         val running = BtcrigNative.isRunning()
+        val expectedRunning = serviceExpectedRunning()
         val configPath = runCatching { BtcrigConfig.ensure(this).absolutePath }.getOrDefault(getString(R.string.unavailable_wrapped))
         val logFile = File(filesDir, "btcrig.log")
         val logPath = logFile.absolutePath
@@ -321,13 +314,14 @@ class ModernActivity : ComponentActivity() {
         val nativeError = cleanLog(BtcrigNative.lastError()).trim()
         val logError = recentLogError(logFile)
         val error = readableError(if (nativeError.startsWith("core returned")) logError.ifBlank { nativeError } else nativeError.ifBlank { logError })
+            .ifBlank { if (!running && expectedRunning) getString(R.string.service_not_running_hint) else "" }
 
         return UiState(
             version = versionName(),
             backend = BtcrigNative.backendName(),
             selfTest = BtcrigNative.selfTest(),
             running = running,
-            service = serviceState.ifEmpty { if (running) "running" else "stopped" },
+            service = serviceState.ifEmpty { if (running) "running" else if (expectedRunning) "missing" else "stopped" },
             hashrate = if (running) formatHashrate(BtcrigNative.hashrate()) else "-- H/s",
             workers = if (running) getString(R.string.workers_value, BtcrigNative.workerCount()) else getString(R.string.workers_empty),
             total = if (running) getString(R.string.total_value, BtcrigNative.totalHashes()) else getString(R.string.total_empty),
@@ -389,6 +383,33 @@ class ModernActivity : ComponentActivity() {
         toast(getString(R.string.copied_to_clipboard))
     }
 
+    private fun serviceExpectedRunning(): Boolean =
+        getSharedPreferences("service", MODE_PRIVATE).getBoolean("desired_running", false)
+
+    private fun setServiceExpectedRunning(running: Boolean) {
+        getSharedPreferences("service", MODE_PRIVATE)
+            .edit()
+            .putBoolean("desired_running", running)
+            .apply()
+    }
+
+    private fun requestIgnoreBatteryOptimizations() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            toast(getString(R.string.battery_optimization_not_needed))
+            return
+        }
+        val manager = getSystemService(POWER_SERVICE) as? PowerManager
+        if (manager?.isIgnoringBatteryOptimizations(packageName) == true) {
+            toast(getString(R.string.battery_optimization_already_ignored))
+            return
+        }
+        val request = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, Uri.parse("package:$packageName"))
+        runCatching { startActivity(request) }.onFailure {
+            runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+                .onFailure { error -> toast(getString(R.string.battery_optimization_open_failed, error.message ?: error.javaClass.simpleName)) }
+        }
+    }
+
     private fun checkForUpdates(currentVersion: String, onResult: (UpdateState) -> Unit) {
         val prefs = getSharedPreferences("updates", MODE_PRIVATE)
         val cachedVersion = prefs.getString("latest_version", "").orEmpty()
@@ -427,13 +448,15 @@ class ModernActivity : ComponentActivity() {
     }
 
     private fun defaultBenchmarkText(): String =
-        (listOf(getString(R.string.benchmark), getString(R.string.benchmark_duration_value, BENCHMARK_SECONDS), getString(R.string.cpu_full_cores_value, "--"), getString(R.string.cpu_recommended_value, "--"), "") +
-            CPU_BACKENDS.flatMap { backend ->
-                benchmarkThreadCounts(Runtime.getRuntime().availableProcessors().coerceAtLeast(1)).map {
-                    getString(R.string.benchmark_backend_value, getString(R.string.benchmark_cpu_thread_label, backend, it), "--")
-                }
-            } +
-            getString(R.string.benchmark_backend_value, "opencl", "--")).joinToString("\n")
+        listOf(
+            getString(R.string.benchmark),
+            getString(R.string.benchmark_duration_value, BENCHMARK_SECONDS),
+            getString(R.string.cpu_full_cores_value, Runtime.getRuntime().availableProcessors().coerceAtLeast(1).toString()),
+            "",
+            getString(R.string.benchmark_backend_value, "CPU", "--"),
+            getString(R.string.benchmark_backend_value, "GPU", "--"),
+            getString(R.string.benchmark_backend_value, "CPU + GPU", "--"),
+        ).joinToString("\n")
 
     private fun cpuSummary(): String {
         val model = if (Build.VERSION.SDK_INT >= 31) {
@@ -507,14 +530,10 @@ private val RigBlue = Color(0xFF4C6F9F)
 private val SoftBlue = Color(0xFFE8EDF8)
 private val CardFill = Color(0xFFEFF1F7)
 private val FieldFill = Color.Transparent
-private val CPU_BACKENDS = listOf("openssl", "fast-c", "arm-sha2", "x86-sha-ni")
 private const val BENCHMARK_SECONDS = 3
 private val DONATION_LEVELS = listOf(0, 1, 3, 5, 99)
 private const val UPDATE_API_URL = "https://api.github.com/repos/lxzcl/BTCRig-Android/releases/latest"
 private const val UPDATE_RELEASE_URL = "https://github.com/lxzcl/BTCRig-Android/releases/latest"
-
-private fun benchmarkThreadCounts(max: Int): List<Int> =
-    listOf(1, 2, 4, max - 2, max).filter { it in 1..max }.distinct()
 private const val UPDATE_CACHE_MS = 6 * 60 * 60 * 1000L
 
 @Composable
@@ -552,7 +571,7 @@ private fun PreviewScreen(page: Int) {
             ui = previewUi(),
             update = UpdateState(latestVersion = "0.1.3", available = true),
             page = page,
-            benchmark = defaultBenchmarkText(),
+            benchmark = "Benchmark\nCPU full cores: 8\n\nCPU: --\nGPU: --\nCPU + GPU: --",
             benchmarking = false,
             onPage = {},
             onOpenUpdate = {},
@@ -561,6 +580,7 @@ private fun PreviewScreen(page: Int) {
             onBenchmark = {},
             basic = previewBasic(),
             onBasicChange = {},
+            onBatteryOptimization = {},
             onJson = {},
             onLog = {},
         )
@@ -581,6 +601,7 @@ private fun BtcrigScreen(
     onBenchmark: () -> Unit,
     basic: BtcrigConfig.Basic,
     onBasicChange: (BtcrigConfig.Basic) -> Unit,
+    onBatteryOptimization: () -> Unit,
     onJson: () -> Unit,
     onLog: () -> Unit,
 ) {
@@ -608,7 +629,7 @@ private fun BtcrigScreen(
                                 verticalArrangement = Arrangement.spacedBy(16.dp),
                             ) {
                                 PageHeader()
-                                SettingsPage(ui, basic, onBasicChange, onJson)
+                                SettingsPage(ui, basic, onBasicChange, onBatteryOptimization, onJson)
                             }
                         }
                         2 -> {
@@ -717,7 +738,11 @@ private fun HomePage(
             EnterUp(delayMillis = 180) {
                 StatusPill(
                     running = ui.running,
-                    text = if (ui.running) stringResource(R.string.status_running) else stringResource(R.string.status_stopped),
+                    text = when {
+                        ui.running -> stringResource(R.string.status_running)
+                        ui.service == "missing" -> stringResource(R.string.status_service_missing)
+                        else -> stringResource(R.string.status_stopped)
+                    },
                     onClick = { if (ui.running) onStop() else onStart() },
                 )
             }
@@ -961,6 +986,7 @@ private fun SettingsPage(
     ui: UiState,
     basic: BtcrigConfig.Basic,
     onBasicChange: (BtcrigConfig.Basic) -> Unit,
+    onBatteryOptimization: () -> Unit,
     onJson: () -> Unit,
 ) {
     val enabled = !ui.running
@@ -1010,6 +1036,7 @@ private fun SettingsPage(
             Line(stringResource(R.string.stop_service_before_save))
         }
     }
+    RigButton(text = stringResource(R.string.ignore_battery_optimizations), onClick = onBatteryOptimization)
     RigButton(text = stringResource(R.string.advanced_json), onClick = onJson, enabled = enabled)
 }
 
@@ -1167,7 +1194,7 @@ private fun BenchmarkBox(text: String) {
             text,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(150.dp)
+                .height(180.dp)
                 .verticalScroll(rememberScrollState()),
             color = MaterialTheme.colorScheme.secondary,
             fontFamily = FontFamily.Monospace,
@@ -1460,9 +1487,6 @@ private fun BtcrigConfig.Basic.copyBasic(
     next.donationPercent = DONATION_LEVELS.find { it == donationPercent } ?: 1
     return next
 }
-
-private fun defaultBenchmarkText(): String =
-    (listOf("Benchmark", "CPU full cores: --", "") + CPU_BACKENDS.map { "$it: --" } + "opencl: --").joinToString("\n")
 
 private fun formatHashrate(hps: Double): String = when {
     hps >= 1_000_000_000.0 -> String.format(Locale.US, "%.2f GH/s", hps / 1_000_000_000.0)

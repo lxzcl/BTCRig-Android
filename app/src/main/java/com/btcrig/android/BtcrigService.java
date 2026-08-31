@@ -12,6 +12,7 @@ import android.os.PowerManager;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Locale;
 
 public final class BtcrigService extends Service {
     static final String ACTION_STOP = "com.btcrig.android.STOP";
@@ -19,10 +20,14 @@ public final class BtcrigService extends Service {
     private static final int NOTIFICATION_ID = 1;
     private PowerManager.WakeLock wakeLock;
     private volatile boolean stopping;
+    private volatile boolean notificationLoopRunning;
+    private Thread notificationThread;
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
+            setDesiredRunning(false);
+            stopNotificationLoop();
             stopCoreAsync(true);
             return START_NOT_STICKY;
         }
@@ -36,16 +41,20 @@ public final class BtcrigService extends Service {
         try {
             config = BtcrigConfig.ensure(this);
         } catch (IOException e) {
+            setDesiredRunning(false);
             stopSelf();
             return START_NOT_STICKY;
         }
         if (!BtcrigNative.start(config.getAbsolutePath())) {
+            setDesiredRunning(false);
             releaseWakeLock();
             stopSelf();
             return START_NOT_STICKY;
         }
 
+        setDesiredRunning(true);
         acquireWakeLock();
+        startNotificationLoop();
         updateNotification();
         return START_STICKY;
     }
@@ -57,6 +66,7 @@ public final class BtcrigService extends Service {
 
     @Override
     public void onDestroy() {
+        stopNotificationLoop();
         stopCoreAsync(false);
         releaseWakeLock();
         super.onDestroy();
@@ -77,6 +87,7 @@ public final class BtcrigService extends Service {
         new Thread(() -> {
             safeStopCore();
             releaseWakeLock();
+            updateNotification();
             if (stopService) {
                 stopSelf();
             }
@@ -113,6 +124,40 @@ public final class BtcrigService extends Service {
         wakeLock = null;
     }
 
+    private void setDesiredRunning(boolean running) {
+        getSharedPreferences("service", MODE_PRIVATE)
+                .edit()
+                .putBoolean("desired_running", running)
+                .apply();
+    }
+
+    private void startNotificationLoop() {
+        notificationLoopRunning = true;
+        if (notificationThread != null && notificationThread.isAlive()) {
+            return;
+        }
+        notificationThread = new Thread(() -> {
+            while (notificationLoopRunning && BtcrigNative.isRunning()) {
+                updateNotification();
+                try {
+                    Thread.sleep(5000);
+                } catch (InterruptedException e) {
+                    return;
+                }
+            }
+            updateNotification();
+        }, "BTCRig-notify");
+        notificationThread.start();
+    }
+
+    private void stopNotificationLoop() {
+        notificationLoopRunning = false;
+        if (notificationThread != null) {
+            notificationThread.interrupt();
+            notificationThread = null;
+        }
+    }
+
     @SuppressWarnings("deprecation")
     private Notification buildNotification() {
         Intent openIntent = getPackageManager().getLaunchIntentForPackage(getPackageName());
@@ -130,14 +175,27 @@ public final class BtcrigService extends Service {
                 : new Notification.Builder(this);
 
         return builder
-                .setContentTitle(getString(R.string.notification_title_ready))
+                .setContentTitle(BtcrigNative.isRunning()
+                        ? getString(R.string.notification_title_running)
+                        : getString(R.string.notification_title_idle))
                 .setContentText(BtcrigNative.isRunning()
-                        ? getString(R.string.notification_stratum, BtcrigNative.stratumStatus())
-                        : getString(R.string.notification_core_stopped))
+                        ? getString(R.string.notification_mining, formatHashrate(BtcrigNative.hashrate()), BtcrigNative.stratumStatus())
+                        : getString(R.string.notification_service_idle))
                 .setSmallIcon(android.R.drawable.stat_sys_upload)
                 .setContentIntent(open)
+                .setOnlyAlertOnce(true)
                 .setOngoing(true)
                 .build();
+    }
+
+    private static String formatHashrate(double hps) {
+        if (hps >= 1000000.0) {
+            return String.format(Locale.US, "%.2f MH/s", hps / 1000000.0);
+        }
+        if (hps >= 1000.0) {
+            return String.format(Locale.US, "%.2f KH/s", hps / 1000.0);
+        }
+        return String.format(Locale.US, "%.0f H/s", hps);
     }
 
     private void updateNotification() {

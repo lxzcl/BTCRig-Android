@@ -11,6 +11,7 @@
     <string name="tab_info">Info</string>
     <string name="status_running">Running</string>
     <string name="status_stopped">Stopped</string>
+    <string name="status_service_missing">Restart needed</string>
     <string name="pool_label">Pool</string>
     <string name="last_error">Last error</string>
     <string name="recent_error">Recent error</string>
@@ -27,6 +28,10 @@
     <string name="enable_opencl_gpu">Enable OpenCL / GPU</string>
     <string name="allow_unknown_certs">Allow unknown certificates</string>
     <string name="keep_awake">Keep awake</string>
+    <string name="ignore_battery_optimizations">Ignore battery optimizations</string>
+    <string name="battery_optimization_not_needed">Battery optimization control is not needed on this Android version.</string>
+    <string name="battery_optimization_already_ignored">Battery optimization is already ignored.</string>
+    <string name="battery_optimization_open_failed">Failed to open battery settings: %1$s</string>
     <string name="stop_service_before_save">Stop service before editing settings</string>
     <string name="advanced_json">Advanced JSON</string>
     <string name="info_title">Info</string>
@@ -71,8 +76,6 @@
     <string name="shares_empty">Shares: --</string>
     <string name="benchmark_duration_value">Each run: 1s warmup + %1$ds measure</string>
     <string name="cpu_full_cores_value">CPU full cores: %1$s</string>
-    <string name="cpu_recommended_value">CPU recommended: %1$s</string>
-    <string name="benchmark_cpu_thread_label">%1$s %2$dT</string>
     <string name="benchmark_backend_value">%1$s: %2$s</string>
     <string name="testing">testing...</string>
     <string name="opencl_label">OpenCL</string>
@@ -88,7 +91,9 @@
     <string name="error_hint_opencl">OpenCL is unavailable. Try disabling GPU mining or check the device OpenCL driver.</string>
     <string name="error_hint_pool">Pool connection failed. Check network, address, and port.</string>
     <string name="error_hint_config">Config looks invalid. Check pool URL, user, or advanced JSON.</string>
-    <string name="notification_title_ready">BTCRig is ready</string>
-    <string name="notification_stratum">Stratum: %1$s</string>
-    <string name="notification_core_stopped">Miner core is stopped.</string>
+    <string name="service_not_running_hint">Service is not mining. Android may have reclaimed it; check the log or restart.</string>
+    <string name="notification_title_running">BTCRig mining</string>
+    <string name="notification_title_idle">BTCRig idle</string>
+    <string name="notification_mining">%1$s · %2$s</string>
+    <string name="notification_service_idle">Service is not mining.</string>
 </resources>

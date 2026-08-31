@@ -721,18 +721,13 @@ static void sleep_seconds(int seconds) {
     }
 }
 
-double btcrig_core_benchmark_cpu(int seconds, int threads) {
+static double run_benchmark_miner(miner_t *miner, int seconds, double failure_value) {
     if (seconds < 1) {
         seconds = 1;
     }
-    if (threads < 1) {
-        threads = 1;
-    }
-
-    miner_t *miner = miner_create(threads);
     if (miner == NULL || miner_start(miner) != 0) {
         miner_destroy(miner);
-        return 0.0;
+        return failure_value;
     }
 
     miner_job_t job;
@@ -745,7 +740,14 @@ double btcrig_core_benchmark_cpu(int seconds, int threads) {
 
     uint64_t hashes = miner_hashes(miner);
     miner_destroy(miner);
-    return (double)(hashes - base_hashes) / (double)seconds;
+    return hashes >= base_hashes ? (double)(hashes - base_hashes) / (double)seconds : 0.0;
+}
+
+double btcrig_core_benchmark_cpu(int seconds, int threads) {
+    if (threads < 1) {
+        threads = 1;
+    }
+    return run_benchmark_miner(miner_create(threads), seconds, 0.0);
 }
 
 double btcrig_core_benchmark_cpu_backend(const char *backend, int seconds, int threads) {
@@ -771,32 +773,33 @@ double btcrig_core_benchmark_opencl(const char *config_path, int seconds) {
     if (btcrig_core_is_running()) {
         return -1.0;
     }
-    if (seconds < 1) {
-        seconds = 1;
+
+    core_config_t config = read_config(config_path);
+    config.opencl.enabled = 1;
+    return run_benchmark_miner(miner_create_with_backend_options(0, &config.opencl, NULL), seconds, -1.0);
+#else
+    (void)config_path;
+    (void)seconds;
+    return -1.0;
+#endif
+}
+
+double btcrig_core_benchmark_cpu_gpu(const char *config_path, int seconds, int threads) {
+#if defined(BTC_MINER_OPENCL)
+    if (btcrig_core_is_running()) {
+        return -1.0;
+    }
+    if (threads < 1) {
+        threads = available_processors();
     }
 
     core_config_t config = read_config(config_path);
     config.opencl.enabled = 1;
-    miner_t *miner = miner_create_with_backend_options(0, &config.opencl, NULL);
-    if (miner == NULL || miner_start(miner) != 0) {
-        miner_destroy(miner);
-        return -1.0;
-    }
-
-    miner_job_t job;
-    prepare_benchmark_job(&job);
-    miner_set_job(miner, &job);
-
-    sleep_seconds(BENCHMARK_WARMUP_SECONDS);
-    uint64_t base_hashes = miner_hashes(miner);
-    sleep_seconds(seconds);
-
-    uint64_t hashes = miner_hashes(miner);
-    miner_destroy(miner);
-    return (double)(hashes - base_hashes) / (double)seconds;
+    return run_benchmark_miner(miner_create_with_backend_options(threads, &config.opencl, NULL), seconds, -1.0);
 #else
     (void)config_path;
     (void)seconds;
+    (void)threads;
     return -1.0;
 #endif
 }

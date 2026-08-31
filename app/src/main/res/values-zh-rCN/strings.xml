@@ -11,6 +11,7 @@
     <string name="tab_info">信息</string>
     <string name="status_running">运行中</string>
     <string name="status_stopped">已停止</string>
+    <string name="status_service_missing">需要重启服务</string>
     <string name="pool_label">矿池</string>
     <string name="last_error">最近错误</string>
     <string name="recent_error">最近错误</string>
@@ -27,6 +28,10 @@
     <string name="enable_opencl_gpu">启用 OpenCL / GPU</string>
     <string name="allow_unknown_certs">兼容未知证书</string>
     <string name="keep_awake">保持唤醒</string>
+    <string name="ignore_battery_optimizations">忽略电池优化</string>
+    <string name="battery_optimization_not_needed">当前 Android 版本不需要电池优化控制。</string>
+    <string name="battery_optimization_already_ignored">已经忽略电池优化。</string>
+    <string name="battery_optimization_open_failed">打开电池设置失败：%1$s</string>
     <string name="stop_service_before_save">停止服务后才能保存设置</string>
     <string name="advanced_json">高级 JSON</string>
     <string name="info_title">信息</string>
@@ -71,8 +76,6 @@
     <string name="shares_empty">份额：--</string>
     <string name="benchmark_duration_value">每项：1 秒预热 + %1$d 秒统计</string>
     <string name="cpu_full_cores_value">CPU 全核：%1$s</string>
-    <string name="cpu_recommended_value">CPU 推荐：%1$s</string>
-    <string name="benchmark_cpu_thread_label">%1$s %2$d 线程</string>
     <string name="benchmark_backend_value">%1$s：%2$s</string>
     <string name="testing">测试中...</string>
     <string name="opencl_label">OpenCL</string>
@@ -88,7 +91,9 @@
     <string name="error_hint_opencl">OpenCL 不可用，可以关闭 GPU 挖矿或检查设备 OpenCL 驱动。</string>
     <string name="error_hint_pool">矿池连接失败，请检查网络、地址和端口。</string>
     <string name="error_hint_config">配置可能有问题，请检查矿池地址、用户或高级 JSON。</string>
-    <string name="notification_title_ready">BTCRig 已就绪</string>
-    <string name="notification_stratum">Stratum：%1$s</string>
-    <string name="notification_core_stopped">挖矿核心已停止。</string>
+    <string name="service_not_running_hint">服务当前没有挖矿，可能被 Android 回收；请查看日志或重新启动。</string>
+    <string name="notification_title_running">BTCRig 正在挖矿</string>
+    <string name="notification_title_idle">BTCRig 空闲</string>
+    <string name="notification_mining">%1$s · %2$s</string>
+    <string name="notification_service_idle">服务当前没有挖矿。</string>
 </resources>

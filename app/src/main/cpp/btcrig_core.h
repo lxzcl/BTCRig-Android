@@ -28,6 +28,7 @@ void btcrig_core_copy_opencl_status(const char *config_path, char *out, size_t o
 double btcrig_core_benchmark_cpu(int seconds, int threads);
 double btcrig_core_benchmark_cpu_backend(const char *backend, int seconds, int threads);
 double btcrig_core_benchmark_opencl(const char *config_path, int seconds);
+double btcrig_core_benchmark_cpu_gpu(const char *config_path, int seconds, int threads);
 
 #ifdef __cplusplus
 }

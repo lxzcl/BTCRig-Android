@@ -177,3 +177,18 @@ Java_com_btcrig_android_BtcrigNative_benchmarkOpencl(JNIEnv *env,
     }
     return hps;
 }
+
+JNIEXPORT jdouble JNICALL
+Java_com_btcrig_android_BtcrigNative_benchmarkCpuGpu(JNIEnv *env,
+                                                     jclass ignored,
+                                                     jstring config_path,
+                                                     jint seconds,
+                                                     jint threads) {
+    (void)ignored;
+    const char *path = config_path == NULL ? NULL : (*env)->GetStringUTFChars(env, config_path, NULL);
+    double hps = btcrig_core_benchmark_cpu_gpu(path, seconds, threads);
+    if (path != NULL) {
+        (*env)->ReleaseStringUTFChars(env, config_path, path);
+    }
+    return hps;
+}

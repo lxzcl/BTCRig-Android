@@ -4,7 +4,7 @@ Android BTCRig app with native CPU/OpenCL mining support.
 
 ## Status
 
-- Version: `0.1.4`
+- Version: `0.1.5`
 - Android: `minSdk 21`, `targetSdk 36`, `compileSdk 36`
 - ABI: `arm64-v8a`, `armeabi-v7a`
 - UI: Jetpack Compose / Material3
@@ -26,6 +26,10 @@ app/build/outputs/apk/debug/app-debug.apk
 
 ## GitHub Actions
 
-`Android Test Build` runs on every `main` push and pull request.
+`Android Test Build` runs on every `main` / `dev` push and pull request.
 
 `Android Release` publishes a signed APK directly to GitHub Releases when `VERSION` changes on `main`.
+
+## License
+
+BTCRig Android is licensed under the GNU General Public License v3.0. See [LICENSE](LICENSE).

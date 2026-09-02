@@ -51,6 +51,7 @@
     <string name="rank_gpu">GPU</string>
     <string name="rank_cpu_gpu">CPU+GPU</string>
     <string name="rank_general">all</string>
+    <string name="my_rank">我的排名</string>
     <string name="view_log">查看日志</string>
     <string name="copy_log">复制日志</string>
     <string name="copied_to_clipboard">已复制到剪贴板。</string>

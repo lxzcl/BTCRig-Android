@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -84,6 +85,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -513,32 +515,39 @@ class ModernActivity : ComponentActivity() {
             readTimeout = 7000
             setRequestProperty("Accept", "application/json")
             setRequestProperty("User-Agent", "BTCRig-Android")
+            setRequestProperty("X-BTCRig-Install-ID", installId())
         }
         return try {
             if (connection.responseCode !in 200..299) throw IllegalStateException("HTTP ${connection.responseCode}")
-            val rows = JSONObject(connection.inputStream.bufferedReader().use { it.readText() }).optJSONArray("rows") ?: JSONArray()
+            val body = JSONObject(connection.inputStream.bufferedReader().use { it.readText() })
+            val rows = body.optJSONArray("rows") ?: JSONArray()
+            val me = body.optJSONObject("me")?.let { rankRow(it, apiMode, it.optInt("rank", 0)) }
             if (rows.length() == 0) return RankUi(rankModeLabel(apiMode), getString(R.string.leaderboard_empty))
             RankUi(
                 title = rankModeLabel(apiMode),
+                me = me,
                 rows = buildList {
                     for (i in 0 until minOf(rows.length(), 50)) {
-                    val row = rows.getJSONObject(i)
-                    val recommended = row.optString("recommended", "")
-                    val nameMode = if (apiMode == "all") rankModeApi(recommended.lowercase(Locale.US).replace("+", "_")) else apiMode
-                    val name = leaderboardName(row, nameMode)
-                    val rate = when (apiMode) {
-                        "cpu" -> row.optDouble("cpu_hashrate")
-                        "gpu" -> row.optDouble("gpu_hashrate")
-                        "cpu_gpu" -> row.optDouble("cpu_gpu_hashrate")
-                        else -> row.optDouble("max_hashrate")
-                    }
-                        add(RankUiRow(row.optInt("rank", i + 1), name.ifBlank { getString(R.string.unknown_device) }, formatHashrate(rate)))
+                        add(rankRow(rows.getJSONObject(i), apiMode, i + 1))
                     }
                 },
             )
         } finally {
             connection.disconnect()
         }
+    }
+
+    private fun rankRow(row: JSONObject, apiMode: String, fallbackRank: Int): RankUiRow {
+        val recommended = row.optString("recommended", "")
+        val nameMode = if (apiMode == "all") rankModeApi(recommended.lowercase(Locale.US).replace("+", "_")) else apiMode
+        val name = leaderboardName(row, nameMode)
+        val rate = when (apiMode) {
+            "cpu" -> row.optDouble("cpu_hashrate")
+            "gpu" -> row.optDouble("gpu_hashrate")
+            "cpu_gpu" -> row.optDouble("cpu_gpu_hashrate")
+            else -> row.optDouble("max_hashrate")
+        }
+        return RankUiRow(row.optInt("rank", fallbackRank), name.ifBlank { getString(R.string.unknown_device) }, formatHashrate(rate))
     }
 
     private fun rankModeApi(mode: String): String = when (mode) {
@@ -688,7 +697,12 @@ private data class ReleaseInfo(val version: String, val url: String)
 
 private data class OpenclInfo(val name: String, val version: String)
 
-private data class RankUi(val title: String, val message: String = "", val rows: List<RankUiRow> = emptyList())
+private data class RankUi(
+    val title: String,
+    val message: String = "",
+    val rows: List<RankUiRow> = emptyList(),
+    val me: RankUiRow? = null,
+)
 
 private data class RankUiRow(val rank: Int, val name: String, val rate: String)
 
@@ -747,7 +761,11 @@ private fun PreviewScreen(page: Int) {
             page = page,
             benchmark = "Benchmark\nCPU full cores: 8\n\nCPU: --\nGPU: --\nCPU + GPU: --",
             rankMode = "all",
-            leaderboard = RankUi("all", rows = listOf(RankUiRow(1, "QTI SM8650 · Adreno(TM) 750", "141.30 MH/s"))),
+            leaderboard = RankUi(
+                "all",
+                rows = listOf(RankUiRow(1, "QTI SM8650 · Adreno(TM) 750", "141.30 MH/s")),
+                me = RankUiRow(12, "QTI SM8650 · Adreno(TM) 750", "141.30 MH/s"),
+            ),
             benchmarking = false,
             onPage = {},
             onRankMode = {},
@@ -1339,6 +1357,7 @@ private fun InfoPage(
         enabled = !ui.running,
         onChange = { onBasicChange(basic.copyBasic(donationPercent = it)) },
     )
+    Spacer(Modifier.height(16.dp))
 }
 
 @Composable
@@ -1358,7 +1377,19 @@ private fun ColumnScope.RankPage(
             RankModeButton(label, rankMode == mode) { onRankMode(mode) }
         }
     }
-    RankBox(leaderboard, Modifier.weight(1f))
+    Box(Modifier.weight(1f).padding(bottom = 16.dp)) {
+        RankBox(
+            leaderboard,
+            Modifier.fillMaxSize(),
+            bottomContentPadding = if (leaderboard.me == null) 0.dp else 82.dp,
+        )
+        leaderboard.me?.let {
+            MyRankCard(
+                it,
+                Modifier.align(Alignment.BottomCenter),
+            )
+        }
+    }
 }
 
 @Composable
@@ -1382,7 +1413,7 @@ private fun RowScope.RankModeButton(text: String, selected: Boolean, onClick: ()
 }
 
 @Composable
-private fun RankBox(rank: RankUi, modifier: Modifier = Modifier) {
+private fun RankBox(rank: RankUi, modifier: Modifier = Modifier, bottomContentPadding: Dp = 0.dp) {
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = CardFill),
@@ -1392,7 +1423,7 @@ private fun RankBox(rank: RankUi, modifier: Modifier = Modifier) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(14.dp)
+                .padding(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 14.dp + bottomContentPadding)
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
@@ -1422,6 +1453,36 @@ private fun RankLine(row: RankUiRow) {
             fontWeight = FontWeight.Medium,
             maxLines = 1,
         )
+    }
+}
+
+@Composable
+private fun MyRankCard(row: RankUiRow, modifier: Modifier = Modifier) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        shape = RoundedCornerShape(20.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(stringResource(R.string.my_rank), color = RigBlue, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    "#${row.rank} ${row.name}",
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    color = MaterialTheme.colorScheme.secondary,
+                    fontSize = 13.sp,
+                )
+            }
+            Text(row.rate, color = Ink, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        }
     }
 }
 

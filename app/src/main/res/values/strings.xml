@@ -51,6 +51,7 @@
     <string name="rank_gpu">GPU</string>
     <string name="rank_cpu_gpu">CPU+GPU</string>
     <string name="rank_general">all</string>
+    <string name="my_rank">My rank</string>
     <string name="view_log">View log</string>
     <string name="copy_log">Copy log</string>
     <string name="copied_to_clipboard">Copied to clipboard.</string>

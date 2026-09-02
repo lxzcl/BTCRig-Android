@@ -522,7 +522,7 @@ class ModernActivity : ComponentActivity() {
                 appendLine("${getString(R.string.leaderboard)} · ${rankModeLabel(apiMode)}")
                 for (i in 0 until minOf(rows.length(), 10)) {
                     val row = rows.getJSONObject(i)
-                    val name = row.optString("soc_name").ifBlank { row.optString("device_name") }.ifBlank { row.optString("gpu_name") }
+                    val name = leaderboardName(row, apiMode)
                     val rate = when (apiMode) {
                         "cpu" -> row.optDouble("cpu_hashrate")
                         "gpu" -> row.optDouble("gpu_hashrate")
@@ -530,9 +530,9 @@ class ModernActivity : ComponentActivity() {
                         else -> row.optDouble("max_hashrate")
                     }
                     append('#').append(row.optInt("rank", i + 1)).append(' ')
-                    appendLine(name.ifBlank { getString(R.string.unknown_device) })
-                    append("  ")
-                    append(getString(R.string.leaderboard_best, formatHashrate(rate), row.optString("recommended", "--")))
+                    append(name.ifBlank { getString(R.string.unknown_device) })
+                    if (apiMode == "all") append(" · ").append(row.optString("recommended", "--"))
+                    append(" · ").append(formatHashrate(rate))
                     appendLine()
                 }
             }.trimEnd()
@@ -552,6 +552,23 @@ class ModernActivity : ComponentActivity() {
         "cpu_gpu" -> getString(R.string.rank_cpu_gpu)
         else -> getString(R.string.rank_general)
     }
+
+    private fun leaderboardName(row: JSONObject, mode: String): String {
+        val soc = row.optString("soc_name").ifBlank { row.optString("device_name") }
+        val gpu = shortGpuName(row.optString("gpu_name"))
+        return when (mode) {
+            "gpu" -> gpu.ifBlank { soc }
+            "cpu" -> soc
+            else -> listOf(soc, gpu).filter { it.isNotBlank() && !it.startsWith("Unknown ") }.joinToString(" · ").ifBlank { soc.ifBlank { gpu } }
+        }
+    }
+
+    private fun shortGpuName(name: String): String = name
+        .replace("QUALCOMM ", "", ignoreCase = true)
+        .replace("OpenCL 3.0 ", "", ignoreCase = true)
+        .replace("OpenCL 2.0 ", "", ignoreCase = true)
+        .replace("OpenCL ", "", ignoreCase = true)
+        .trim()
 
     private fun submitBenchmark(cpuHps: Double, gpuHps: Double, cpuGpuHps: Double): String {
         val opencl = BtcrigNative.openclStatus(runCatching { BtcrigConfig.ensure(this).absolutePath }.getOrDefault(""))
@@ -709,13 +726,13 @@ private fun HomePreview() = PreviewScreen(0)
 @Composable
 private fun SettingsPreview() = PreviewScreen(1)
 
-@Preview(name = "Rank", showBackground = true, widthDp = 390, heightDp = 844)
-@Composable
-private fun RankPreview() = PreviewScreen(2)
-
 @Preview(name = "Info", showBackground = true, widthDp = 390, heightDp = 844)
 @Composable
-private fun InfoPreview() = PreviewScreen(3)
+private fun InfoPreview() = PreviewScreen(2)
+
+@Preview(name = "Rank", showBackground = true, widthDp = 390, heightDp = 844)
+@Composable
+private fun RankPreview() = PreviewScreen(3)
 
 @Composable
 private fun PreviewScreen(page: Int) {
@@ -797,7 +814,7 @@ private fun BtcrigScreen(
                                 verticalArrangement = Arrangement.spacedBy(16.dp),
                             ) {
                                 PageHeader()
-                                RankPage(leaderboard, rankMode, onRankMode)
+                                InfoPage(ui, update, benchmark, benchmarking, onBenchmark, onLog, basic, onBasicChange)
                             }
                         }
                         3 -> {
@@ -806,7 +823,7 @@ private fun BtcrigScreen(
                                 verticalArrangement = Arrangement.spacedBy(16.dp),
                             ) {
                                 PageHeader()
-                                InfoPage(ui, update, benchmark, benchmarking, onBenchmark, onLog, basic, onBasicChange)
+                                RankPage(leaderboard, rankMode, onRankMode)
                             }
                         }
                         else -> HomePage(
@@ -846,8 +863,8 @@ private fun BottomNav(page: Int, onPage: (Int) -> Unit) {
                 listOf(
                     stringResource(R.string.tab_home),
                     stringResource(R.string.tab_settings),
-                    stringResource(R.string.tab_rank),
                     stringResource(R.string.tab_info),
+                    stringResource(R.string.tab_rank),
                 ).forEachIndexed { index, title ->
                     Column(
                         modifier = Modifier
@@ -1329,15 +1346,15 @@ private fun RankPage(
     Text(stringResource(R.string.leaderboard), color = RigBlue, fontSize = 13.sp, fontWeight = FontWeight.Medium)
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         listOf(
+            "all" to stringResource(R.string.rank_general),
             "cpu" to stringResource(R.string.rank_cpu),
             "gpu" to stringResource(R.string.rank_gpu),
             "cpu_gpu" to stringResource(R.string.rank_cpu_gpu),
-            "all" to stringResource(R.string.rank_general),
         ).forEach { (mode, label) ->
             RankModeButton(label, rankMode == mode) { onRankMode(mode) }
         }
     }
-    BenchmarkBox(leaderboard)
+    RankBox(leaderboard)
 }
 
 @Composable
@@ -1356,6 +1373,23 @@ private fun RowScope.RankModeButton(text: String, selected: Boolean, onClick: ()
             color = if (selected) Accent else Muted,
             fontSize = 13.sp,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+        )
+    }
+}
+
+@Composable
+private fun RankBox(text: String) {
+    SoftCard(compact = true) {
+        Text(
+            text,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(420.dp)
+                .verticalScroll(rememberScrollState()),
+            color = MaterialTheme.colorScheme.secondary,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 13.sp,
+            lineHeight = 20.sp,
         )
     }
 }

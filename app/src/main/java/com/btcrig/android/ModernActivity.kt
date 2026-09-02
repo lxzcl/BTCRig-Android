@@ -1427,33 +1427,36 @@ private fun RankBox(rank: RankUi, modifier: Modifier = Modifier, bottomContentPa
                 .fillMaxSize()
                 .padding(start = 14.dp, top = 14.dp, end = 14.dp, bottom = 14.dp + bottomContentPadding)
                 .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             if (rank.message.isNotBlank()) {
                 Text(rank.message, color = MaterialTheme.colorScheme.secondary, fontSize = 14.sp, lineHeight = 20.sp)
             }
             rank.rows.forEachIndexed { index, row ->
-                RankLine(row, divider = index != rank.rows.lastIndex)
+                RankLine(row)
+                if (index != rank.rows.lastIndex) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(10.dp)
+                            .drawBehind {
+                                drawLine(
+                                    Color(0x14000000),
+                                    Offset(0f, size.height / 2f),
+                                    Offset(size.width, size.height / 2f),
+                                    strokeWidth = 1.dp.toPx(),
+                                )
+                            }
+                    )
+                }
             }
         }
     }
 }
 
 @Composable
-private fun RankLine(row: RankUiRow, divider: Boolean = false) {
+private fun RankLine(row: RankUiRow) {
     Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .drawBehind {
-                if (divider) {
-                    drawLine(
-                        Color(0x14000000),
-                        Offset(0f, size.height),
-                        Offset(size.width, size.height),
-                        strokeWidth = 1.dp.toPx(),
-                    )
-                }
-            },
+        modifier = Modifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(

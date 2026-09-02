@@ -115,7 +115,7 @@ class ModernActivity : ComponentActivity() {
             var benchmark by remember { mutableStateOf(loadBenchmarkText()) }
             var benchmarking by remember { mutableStateOf(false) }
             var rankMode by remember { mutableStateOf("all") }
-            var leaderboard by remember { mutableStateOf(defaultLeaderboardText()) }
+            var leaderboard by remember { mutableStateOf(defaultLeaderboard()) }
             var update by remember { mutableStateOf(UpdateState()) }
 
             fun refreshUpdate() {
@@ -495,18 +495,18 @@ class ModernActivity : ComponentActivity() {
             getString(R.string.benchmark_backend_value, "CPU + GPU", "--"),
         ).joinToString("\n")
 
-    private fun defaultLeaderboardText(): String =
-        "${getString(R.string.leaderboard)}\n${getString(R.string.leaderboard_loading)}"
+    private fun defaultLeaderboard(): RankUi =
+        RankUi(getString(R.string.leaderboard), getString(R.string.leaderboard_loading))
 
-    private fun fetchLeaderboard(mode: String, onResult: (String) -> Unit) {
+    private fun fetchLeaderboard(mode: String, onResult: (RankUi) -> Unit) {
         Thread {
-            val text = runCatching { leaderboardText(mode) }
-                .getOrElse { "${getString(R.string.leaderboard)}\n${getString(R.string.leaderboard_load_failed, it.message ?: it.javaClass.simpleName)}" }
-            runOnUiThread { onResult(text) }
+            val rank = runCatching { leaderboardUi(mode) }
+                .getOrElse { RankUi(getString(R.string.leaderboard), getString(R.string.leaderboard_load_failed, it.message ?: it.javaClass.simpleName)) }
+            runOnUiThread { onResult(rank) }
         }.start()
     }
 
-    private fun leaderboardText(mode: String): String {
+    private fun leaderboardUi(mode: String): RankUi {
         val apiMode = rankModeApi(mode)
         val connection = (URL("$RANK_API_BASE_URL/leaderboard?mode=$apiMode").openConnection() as HttpURLConnection).apply {
             connectTimeout = 7000
@@ -517,25 +517,25 @@ class ModernActivity : ComponentActivity() {
         return try {
             if (connection.responseCode !in 200..299) throw IllegalStateException("HTTP ${connection.responseCode}")
             val rows = JSONObject(connection.inputStream.bufferedReader().use { it.readText() }).optJSONArray("rows") ?: JSONArray()
-            if (rows.length() == 0) return "${getString(R.string.leaderboard)}\n${getString(R.string.leaderboard_empty)}"
-            buildString {
-                appendLine("${getString(R.string.leaderboard)} · ${rankModeLabel(apiMode)}")
-                for (i in 0 until minOf(rows.length(), 10)) {
+            if (rows.length() == 0) return RankUi(rankModeLabel(apiMode), getString(R.string.leaderboard_empty))
+            RankUi(
+                title = rankModeLabel(apiMode),
+                rows = buildList {
+                    for (i in 0 until minOf(rows.length(), 50)) {
                     val row = rows.getJSONObject(i)
-                    val name = leaderboardName(row, apiMode)
+                    val recommended = row.optString("recommended", "")
+                    val nameMode = if (apiMode == "all") rankModeApi(recommended.lowercase(Locale.US).replace("+", "_")) else apiMode
+                    val name = leaderboardName(row, nameMode)
                     val rate = when (apiMode) {
                         "cpu" -> row.optDouble("cpu_hashrate")
                         "gpu" -> row.optDouble("gpu_hashrate")
                         "cpu_gpu" -> row.optDouble("cpu_gpu_hashrate")
                         else -> row.optDouble("max_hashrate")
                     }
-                    append('#').append(row.optInt("rank", i + 1)).append(' ')
-                    append(name.ifBlank { getString(R.string.unknown_device) })
-                    if (apiMode == "all") append(" · ").append(row.optString("recommended", "--"))
-                    append(" · ").append(formatHashrate(rate))
-                    appendLine()
-                }
-            }.trimEnd()
+                        add(RankUiRow(row.optInt("rank", i + 1), name.ifBlank { getString(R.string.unknown_device) }, formatHashrate(rate)))
+                    }
+                },
+            )
         } finally {
             connection.disconnect()
         }
@@ -688,6 +688,10 @@ private data class ReleaseInfo(val version: String, val url: String)
 
 private data class OpenclInfo(val name: String, val version: String)
 
+private data class RankUi(val title: String, val message: String = "", val rows: List<RankUiRow> = emptyList())
+
+private data class RankUiRow(val rank: Int, val name: String, val rate: String)
+
 private val Ink = Color(0xFF172033)
 private val Muted = Color(0xFF6E7890)
 private val Accent = Color(0xFF26364F)
@@ -743,7 +747,7 @@ private fun PreviewScreen(page: Int) {
             page = page,
             benchmark = "Benchmark\nCPU full cores: 8\n\nCPU: --\nGPU: --\nCPU + GPU: --",
             rankMode = "all",
-            leaderboard = "Leaderboard\n#1 QTI SM8650\n  Best: 141.30 MH/s · CPU+GPU",
+            leaderboard = RankUi("all", rows = listOf(RankUiRow(1, "QTI SM8650 · Adreno(TM) 750", "141.30 MH/s"))),
             benchmarking = false,
             onPage = {},
             onRankMode = {},
@@ -767,7 +771,7 @@ private fun BtcrigScreen(
     page: Int,
     benchmark: String,
     rankMode: String,
-    leaderboard: String,
+    leaderboard: RankUi,
     benchmarking: Boolean,
     onPage: (Int) -> Unit,
     onRankMode: (String) -> Unit,
@@ -819,7 +823,7 @@ private fun BtcrigScreen(
                         }
                         3 -> {
                             Column(
-                                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                                modifier = Modifier.fillMaxSize(),
                                 verticalArrangement = Arrangement.spacedBy(16.dp),
                             ) {
                                 PageHeader()
@@ -1338,8 +1342,8 @@ private fun InfoPage(
 }
 
 @Composable
-private fun RankPage(
-    leaderboard: String,
+private fun ColumnScope.RankPage(
+    leaderboard: RankUi,
     rankMode: String,
     onRankMode: (String) -> Unit,
 ) {
@@ -1354,7 +1358,7 @@ private fun RankPage(
             RankModeButton(label, rankMode == mode) { onRankMode(mode) }
         }
     }
-    RankBox(leaderboard)
+    RankBox(leaderboard, Modifier.weight(1f))
 }
 
 @Composable
@@ -1378,18 +1382,45 @@ private fun RowScope.RankModeButton(text: String, selected: Boolean, onClick: ()
 }
 
 @Composable
-private fun RankBox(text: String) {
-    SoftCard(compact = true) {
-        Text(
-            text,
+private fun RankBox(rank: RankUi, modifier: Modifier = Modifier) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = CardFill),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        shape = RoundedCornerShape(22.dp),
+    ) {
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .height(420.dp)
+                .fillMaxSize()
+                .padding(14.dp)
                 .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            if (rank.message.isNotBlank()) {
+                Text(rank.message, color = MaterialTheme.colorScheme.secondary, fontSize = 14.sp, lineHeight = 20.sp)
+            }
+            rank.rows.forEach { RankLine(it) }
+        }
+    }
+}
+
+@Composable
+private fun RankLine(row: RankUiRow) {
+    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            "#${row.rank} ${row.name}",
+            modifier = Modifier.weight(1f).padding(end = 10.dp),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             color = MaterialTheme.colorScheme.secondary,
-            fontFamily = FontFamily.Monospace,
             fontSize = 13.sp,
-            lineHeight = 20.sp,
+        )
+        Text(
+            row.rate,
+            color = Ink,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
         )
     }
 }

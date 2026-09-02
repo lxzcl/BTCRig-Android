@@ -72,6 +72,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -1431,23 +1433,29 @@ private fun RankBox(rank: RankUi, modifier: Modifier = Modifier, bottomContentPa
                 Text(rank.message, color = MaterialTheme.colorScheme.secondary, fontSize = 14.sp, lineHeight = 20.sp)
             }
             rank.rows.forEachIndexed { index, row ->
-                RankLine(row)
-                if (index != rank.rows.lastIndex) {
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .height(1.dp)
-                            .background(Color(0x14000000))
-                    )
-                }
+                RankLine(row, divider = index != rank.rows.lastIndex)
             }
         }
     }
 }
 
 @Composable
-private fun RankLine(row: RankUiRow) {
-    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+private fun RankLine(row: RankUiRow, divider: Boolean = false) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .drawBehind {
+                if (divider) {
+                    drawLine(
+                        Color(0x14000000),
+                        Offset(0f, size.height),
+                        Offset(size.width, size.height),
+                        strokeWidth = 1.dp.toPx(),
+                    )
+                }
+            },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Text(
             "${rankPrefix(row.rank)} ${row.name}",
             modifier = Modifier.weight(1f).padding(end = 10.dp),

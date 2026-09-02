@@ -109,7 +109,7 @@ class ModernActivity : ComponentActivity() {
             var showLog by remember { mutableStateOf(false) }
             var logText by remember { mutableStateOf("") }
             var basic by remember { mutableStateOf(readBasic()) }
-            var benchmark by remember { mutableStateOf(defaultBenchmarkText()) }
+            var benchmark by remember { mutableStateOf(loadBenchmarkText()) }
             var benchmarking by remember { mutableStateOf(false) }
             var update by remember { mutableStateOf(UpdateState()) }
 
@@ -206,9 +206,11 @@ class ModernActivity : ComponentActivity() {
                             showTesting("CPU + GPU")
                             val cpuGpuHps = if (gpuHps >= 0.0) BtcrigNative.benchmarkCpuGpu(configPath, BENCHMARK_SECONDS, threads) else -1.0
                             lines.add(getString(R.string.benchmark_backend_value, "CPU + GPU", if (cpuGpuHps >= 0.0) formatHashrate(cpuGpuHps) else unavailable))
+                            val result = lines.joinToString("\n")
+                            saveBenchmarkText(result)
                             runOnUiThread {
                                 benchmarking = false
-                                benchmark = lines.joinToString("\n")
+                                benchmark = result
                             }
                         }.start()
                     },
@@ -382,6 +384,13 @@ class ModernActivity : ComponentActivity() {
         val clipboard = getSystemService(CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText(label, text))
         toast(getString(R.string.copied_to_clipboard))
+    }
+
+    private fun loadBenchmarkText(): String =
+        getSharedPreferences("benchmark", MODE_PRIVATE).getString("last_text", null) ?: defaultBenchmarkText()
+
+    private fun saveBenchmarkText(text: String) {
+        getSharedPreferences("benchmark", MODE_PRIVATE).edit().putString("last_text", text).apply()
     }
 
     private fun serviceExpectedRunning(): Boolean =
@@ -1199,7 +1208,7 @@ private fun BenchmarkBox(text: String) {
             text,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(180.dp)
+                .height(144.dp)
                 .verticalScroll(rememberScrollState()),
             color = MaterialTheme.colorScheme.secondary,
             fontFamily = FontFamily.Monospace,
@@ -1335,15 +1344,25 @@ private val AnsiEscape = Regex("\u001B\\[[0-9;]*[A-Za-z]")
 
 private fun cleanLog(text: String): String = AnsiEscape.replace(text, "")
 
-private fun recentLogError(file: File): String =
-    readTail(file, 64 * 1024, "", "") { "" }
+private fun recentLogError(file: File): String {
+    for (line in readTail(file, 64 * 1024, "", "") { "" }
         .lineSequence()
         .map { it.trim() }
         .filter { it.isNotEmpty() }
         .toList()
-        .asReversed()
-        .firstOrNull(::isImportantLogLine)
-        .orEmpty()
+        .asReversed()) {
+        if (isRecoveryLogLine(line)) return ""
+        if (isImportantLogLine(line)) return line
+    }
+    return ""
+}
+
+private fun isRecoveryLogLine(line: String): Boolean {
+    val lower = line.lowercase(Locale.US)
+    return "[stats] rate=" in lower ||
+        ("[submit-rsp]" in lower && "accepted" in lower) ||
+        "[authorize] ok" in lower
+}
 
 private fun isImportantLogLine(line: String): Boolean {
     val lower = line.lowercase(Locale.US)

@@ -37,6 +37,15 @@
     <string name="info_title">信息</string>
     <string name="benchmark">Benchmark</string>
     <string name="benchmarking">Benchmarking...</string>
+    <string name="leaderboard">排行榜</string>
+    <string name="leaderboard_loading">加载中...</string>
+    <string name="leaderboard_empty">暂无数据，运行 Benchmark 后会上传本机结果。</string>
+    <string name="leaderboard_best">最高：%1$s · %2$s</string>
+    <string name="leaderboard_uploaded">排行榜：已上传</string>
+    <string name="leaderboard_rejected">排行榜：已拒绝（%1$s）</string>
+    <string name="leaderboard_upload_failed">排行榜上传失败：%1$s</string>
+    <string name="leaderboard_load_failed">加载失败：%1$s</string>
+    <string name="unknown_device">未知设备</string>
     <string name="view_log">查看日志</string>
     <string name="copy_log">复制日志</string>
     <string name="copied_to_clipboard">已复制到剪贴板。</string>

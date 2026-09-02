@@ -91,6 +91,8 @@ import java.io.FileInputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.Locale
+import java.util.UUID
+import org.json.JSONArray
 import org.json.JSONObject
 
 class ModernActivity : ComponentActivity() {
@@ -111,10 +113,14 @@ class ModernActivity : ComponentActivity() {
             var basic by remember { mutableStateOf(readBasic()) }
             var benchmark by remember { mutableStateOf(loadBenchmarkText()) }
             var benchmarking by remember { mutableStateOf(false) }
+            var leaderboard by remember { mutableStateOf(defaultLeaderboardText()) }
             var update by remember { mutableStateOf(UpdateState()) }
 
             fun refreshUpdate() {
                 checkForUpdates(ui.version) { update = it }
+            }
+            fun refreshLeaderboard() {
+                fetchLeaderboard { leaderboard = it }
             }
 
             DisposableEffect(Unit) {
@@ -148,6 +154,7 @@ class ModernActivity : ComponentActivity() {
 
             LaunchedEffect(Unit) {
                 refreshUpdate()
+                refreshLeaderboard()
             }
 
             BtcrigTheme {
@@ -156,6 +163,7 @@ class ModernActivity : ComponentActivity() {
                     update = update,
                     page = page,
                     benchmark = benchmark,
+                    leaderboard = leaderboard,
                     benchmarking = benchmarking,
                     onPage = { page = it },
                     onOpenUpdate = { openRelease(update) },
@@ -206,11 +214,16 @@ class ModernActivity : ComponentActivity() {
                             showTesting("CPU + GPU")
                             val cpuGpuHps = if (gpuHps >= 0.0) BtcrigNative.benchmarkCpuGpu(configPath, BENCHMARK_SECONDS, threads) else -1.0
                             lines.add(getString(R.string.benchmark_backend_value, "CPU + GPU", if (cpuGpuHps >= 0.0) formatHashrate(cpuGpuHps) else unavailable))
+                            val submitText = runCatching { submitBenchmark(cpuHps, gpuHps, cpuGpuHps) }
+                                .getOrElse { error -> getString(R.string.leaderboard_upload_failed, error.message ?: error.javaClass.simpleName) }
+                            lines.add("")
+                            lines.add(submitText)
                             val result = lines.joinToString("\n")
                             saveBenchmarkText(result)
                             runOnUiThread {
                                 benchmarking = false
                                 benchmark = result
+                                refreshLeaderboard()
                             }
                         }.start()
                     },
@@ -393,6 +406,13 @@ class ModernActivity : ComponentActivity() {
         getSharedPreferences("benchmark", MODE_PRIVATE).edit().putString("last_text", text).apply()
     }
 
+    private fun installId(): String {
+        val prefs = getSharedPreferences("rank", MODE_PRIVATE)
+        return prefs.getString("install_id", null) ?: UUID.randomUUID().toString().also {
+            prefs.edit().putString("install_id", it).apply()
+        }
+    }
+
     private fun serviceExpectedRunning(): Boolean =
         getSharedPreferences("service", MODE_PRIVATE).getBoolean("desired_running", false)
 
@@ -468,6 +488,90 @@ class ModernActivity : ComponentActivity() {
             getString(R.string.benchmark_backend_value, "CPU + GPU", "--"),
         ).joinToString("\n")
 
+    private fun defaultLeaderboardText(): String =
+        "${getString(R.string.leaderboard)}\n${getString(R.string.leaderboard_loading)}"
+
+    private fun fetchLeaderboard(onResult: (String) -> Unit) {
+        Thread {
+            val text = runCatching { leaderboardText() }
+                .getOrElse { "${getString(R.string.leaderboard)}\n${getString(R.string.leaderboard_load_failed, it.message ?: it.javaClass.simpleName)}" }
+            runOnUiThread { onResult(text) }
+        }.start()
+    }
+
+    private fun leaderboardText(): String {
+        val connection = (URL("$RANK_API_BASE_URL/leaderboard?mode=all").openConnection() as HttpURLConnection).apply {
+            connectTimeout = 7000
+            readTimeout = 7000
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("User-Agent", "BTCRig-Android")
+        }
+        return try {
+            if (connection.responseCode !in 200..299) throw IllegalStateException("HTTP ${connection.responseCode}")
+            val rows = JSONObject(connection.inputStream.bufferedReader().use { it.readText() }).optJSONArray("rows") ?: JSONArray()
+            if (rows.length() == 0) return "${getString(R.string.leaderboard)}\n${getString(R.string.leaderboard_empty)}"
+            buildString {
+                appendLine(getString(R.string.leaderboard))
+                for (i in 0 until minOf(rows.length(), 10)) {
+                    val row = rows.getJSONObject(i)
+                    val name = row.optString("soc_name").ifBlank { row.optString("device_name") }.ifBlank { row.optString("gpu_name") }
+                    append('#').append(row.optInt("rank", i + 1)).append(' ')
+                    appendLine(name.ifBlank { getString(R.string.unknown_device) })
+                    append("  ")
+                    append(getString(R.string.leaderboard_best, formatHashrate(row.optDouble("max_hashrate")), row.optString("recommended", "--")))
+                    appendLine()
+                }
+            }.trimEnd()
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun submitBenchmark(cpuHps: Double, gpuHps: Double, cpuGpuHps: Double): String {
+        val opencl = BtcrigNative.openclStatus(runCatching { BtcrigConfig.ensure(this).absolutePath }.getOrDefault(""))
+        val gpu = parseOpencl(opencl)
+        val json = JSONObject()
+            .put("app_version", versionName())
+            .put("android_version", "${Build.VERSION.RELEASE} API ${Build.VERSION.SDK_INT}")
+            .put("brand", Build.BRAND)
+            .put("model", Build.MODEL)
+            .put("device", Build.DEVICE)
+            .put("hardware", Build.HARDWARE)
+            .put("soc_manufacturer", if (Build.VERSION.SDK_INT >= 31) Build.SOC_MANUFACTURER else "")
+            .put("soc_model", if (Build.VERSION.SDK_INT >= 31) Build.SOC_MODEL else Build.HARDWARE)
+            .put("cpu_abi", Build.SUPPORTED_ABIS.firstOrNull().orEmpty())
+            .put("cpu_cores", Runtime.getRuntime().availableProcessors().coerceAtLeast(1))
+            .put("gpu_name", gpu.name)
+            .put("opencl_version", gpu.version)
+            .put("cpu_hashrate", cpuHps.coerceAtLeast(0.0))
+            .put("gpu_hashrate", gpuHps.coerceAtLeast(0.0))
+            .put("cpu_gpu_hashrate", cpuGpuHps.coerceAtLeast(0.0))
+            .put("duration_sec", BENCHMARK_SECONDS)
+            .put("install_id", installId())
+        val connection = (URL("$RANK_API_BASE_URL/benchmarks").openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 7000
+            readTimeout = 7000
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("User-Agent", "BTCRig-Android")
+        }
+        return try {
+            connection.outputStream.use { it.write(json.toString().toByteArray(Charsets.UTF_8)) }
+            val body = (if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream)
+                ?.bufferedReader()
+                ?.use { it.readText() }
+                .orEmpty()
+            if (connection.responseCode !in 200..299) throw IllegalStateException("HTTP ${connection.responseCode}: $body")
+            val res = JSONObject(body)
+            if (res.optBoolean("accepted")) getString(R.string.leaderboard_uploaded)
+            else getString(R.string.leaderboard_rejected, res.optString("reject_reason", "rejected"))
+        } finally {
+            connection.disconnect()
+        }
+    }
+
     private fun cpuSummary(): String {
         val model = if (Build.VERSION.SDK_INT >= 31) {
             listOf(Build.SOC_MANUFACTURER, Build.SOC_MODEL).filter { it.isNotBlank() }.joinToString(" ")
@@ -494,6 +598,12 @@ class ModernActivity : ComponentActivity() {
         val name = parts.getOrNull(2).orEmpty().ifBlank { parts.getOrNull(1).orEmpty() }
         val api = parts.getOrNull(3).orEmpty()
         return api.ifBlank { name }.ifBlank { device }
+    }
+
+    private fun parseOpencl(opencl: String): OpenclInfo {
+        val line = opencl.lineSequence().firstOrNull { it.startsWith("#0 ") }.orEmpty()
+        val parts = line.split('/').map { it.trim() }
+        return OpenclInfo(parts.getOrNull(2).orEmpty(), parts.getOrNull(3).orEmpty())
     }
 
     @Suppress("DEPRECATION")
@@ -533,6 +643,8 @@ private data class UpdateState(
 
 private data class ReleaseInfo(val version: String, val url: String)
 
+private data class OpenclInfo(val name: String, val version: String)
+
 private val Ink = Color(0xFF172033)
 private val Muted = Color(0xFF6E7890)
 private val Accent = Color(0xFF26364F)
@@ -542,6 +654,7 @@ private val CardFill = Color(0xFFEFF1F7)
 private val FieldFill = Color.Transparent
 private const val BENCHMARK_SECONDS = 3
 private val DONATION_LEVELS = listOf(0, 1, 3, 5, 99)
+private const val RANK_API_BASE_URL = "https://www.btcrig.net/api/v1"
 private const val UPDATE_API_URL = "https://api.github.com/repos/lxzcl/BTCRig-Android/releases/latest"
 private const val UPDATE_RELEASE_URL = "https://github.com/lxzcl/BTCRig-Android/releases/latest"
 private const val UPDATE_CACHE_MS = 6 * 60 * 60 * 1000L
@@ -582,6 +695,7 @@ private fun PreviewScreen(page: Int) {
             update = UpdateState(latestVersion = "0.1.3", available = true),
             page = page,
             benchmark = "Benchmark\nCPU full cores: 8\n\nCPU: --\nGPU: --\nCPU + GPU: --",
+            leaderboard = "Leaderboard\n#1 QTI SM8650\n  Best: 141.30 MH/s · CPU+GPU",
             benchmarking = false,
             onPage = {},
             onOpenUpdate = {},
@@ -603,6 +717,7 @@ private fun BtcrigScreen(
     update: UpdateState,
     page: Int,
     benchmark: String,
+    leaderboard: String,
     benchmarking: Boolean,
     onPage: (Int) -> Unit,
     onOpenUpdate: () -> Unit,
@@ -648,7 +763,7 @@ private fun BtcrigScreen(
                                 verticalArrangement = Arrangement.spacedBy(16.dp),
                             ) {
                                 PageHeader()
-                                InfoPage(ui, update, benchmark, benchmarking, onBenchmark, onLog, basic, onBasicChange)
+                                InfoPage(ui, update, benchmark, leaderboard, benchmarking, onBenchmark, onLog, basic, onBasicChange)
                             }
                         }
                         else -> HomePage(
@@ -1132,6 +1247,7 @@ private fun InfoPage(
     ui: UiState,
     update: UpdateState,
     benchmark: String,
+    leaderboard: String,
     benchmarking: Boolean,
     onBenchmark: () -> Unit,
     onLog: () -> Unit,
@@ -1145,6 +1261,7 @@ private fun InfoPage(
         enabled = !benchmarking && !ui.running
     )
     BenchmarkBox(benchmark)
+    BenchmarkBox(leaderboard)
     RigButton(text = stringResource(R.string.view_log), onClick = onLog)
     SoftCard(compact = true) {
         Line(updateText(update))

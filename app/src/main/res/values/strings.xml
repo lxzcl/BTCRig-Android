@@ -37,6 +37,15 @@
     <string name="info_title">Info</string>
     <string name="benchmark">Benchmark</string>
     <string name="benchmarking">Benchmarking...</string>
+    <string name="leaderboard">Leaderboard</string>
+    <string name="leaderboard_loading">Loading...</string>
+    <string name="leaderboard_empty">No data yet. Run Benchmark to upload this device.</string>
+    <string name="leaderboard_best">Best: %1$s · %2$s</string>
+    <string name="leaderboard_uploaded">Leaderboard: uploaded</string>
+    <string name="leaderboard_rejected">Leaderboard: rejected (%1$s)</string>
+    <string name="leaderboard_upload_failed">Leaderboard upload failed: %1$s</string>
+    <string name="leaderboard_load_failed">Load failed: %1$s</string>
+    <string name="unknown_device">Unknown device</string>
     <string name="view_log">View log</string>
     <string name="copy_log">Copy log</string>
     <string name="copied_to_clipboard">Copied to clipboard.</string>

@@ -1430,16 +1430,26 @@ private fun RankBox(rank: RankUi, modifier: Modifier = Modifier, bottomContentPa
             if (rank.message.isNotBlank()) {
                 Text(rank.message, color = MaterialTheme.colorScheme.secondary, fontSize = 14.sp, lineHeight = 20.sp)
             }
-            rank.rows.forEach { RankLine(it) }
+            rank.rows.forEachIndexed { index, row ->
+                RankLine(row)
+                if (index != rank.rows.lastIndex) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(1.dp)
+                            .background(Color(0x14000000))
+                    )
+                }
+            }
         }
     }
 }
 
 @Composable
 private fun RankLine(row: RankUiRow) {
-    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier = Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(
-            "#${row.rank} ${row.name}",
+            "${rankPrefix(row.rank)} ${row.name}",
             modifier = Modifier.weight(1f).padding(end = 10.dp),
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -1454,6 +1464,13 @@ private fun RankLine(row: RankUiRow) {
             maxLines = 1,
         )
     }
+}
+
+private fun rankPrefix(rank: Int): String = when (rank) {
+    1 -> "🥇"
+    2 -> "🥈"
+    3 -> "🥉"
+    else -> "#$rank"
 }
 
 @Composable
@@ -1474,7 +1491,7 @@ private fun MyRankCard(row: RankUiRow, modifier: Modifier = Modifier) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(stringResource(R.string.my_rank), color = RigBlue, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                 Text(
-                    "#${row.rank} ${row.name}",
+                    "${rankPrefix(row.rank)} ${row.name}",
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     color = MaterialTheme.colorScheme.secondary,

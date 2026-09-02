@@ -547,7 +547,12 @@ class ModernActivity : ComponentActivity() {
             "cpu" -> row.optDouble("cpu_hashrate")
             "gpu" -> row.optDouble("gpu_hashrate")
             "cpu_gpu" -> row.optDouble("cpu_gpu_hashrate")
-            else -> row.optDouble("max_hashrate")
+            else -> when (nameMode) {
+                "cpu" -> row.optDouble("cpu_hashrate")
+                "gpu" -> row.optDouble("gpu_hashrate")
+                "cpu_gpu" -> row.optDouble("cpu_gpu_hashrate")
+                else -> row.optDouble("max_hashrate")
+            }
         }
         return RankUiRow(row.optInt("rank", fallbackRank), name.ifBlank { getString(R.string.unknown_device) }, formatHashrate(rate))
     }

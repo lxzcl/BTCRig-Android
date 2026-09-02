@@ -8,6 +8,7 @@
     <string name="enable_cpu_or_opencl_first">请先启用 CPU 线程或 OpenCL。</string>
     <string name="tab_home">首页</string>
     <string name="tab_settings">设置</string>
+    <string name="tab_rank">排行</string>
     <string name="tab_info">信息</string>
     <string name="status_running">运行中</string>
     <string name="status_stopped">已停止</string>
@@ -46,6 +47,10 @@
     <string name="leaderboard_upload_failed">排行榜上传失败：%1$s</string>
     <string name="leaderboard_load_failed">加载失败：%1$s</string>
     <string name="unknown_device">未知设备</string>
+    <string name="rank_cpu">CPU</string>
+    <string name="rank_gpu">GPU</string>
+    <string name="rank_cpu_gpu">CPU+GPU</string>
+    <string name="rank_general">通用</string>
     <string name="view_log">查看日志</string>
     <string name="copy_log">复制日志</string>
     <string name="copied_to_clipboard">已复制到剪贴板。</string>

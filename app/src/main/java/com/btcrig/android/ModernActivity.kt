@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -113,6 +114,7 @@ class ModernActivity : ComponentActivity() {
             var basic by remember { mutableStateOf(readBasic()) }
             var benchmark by remember { mutableStateOf(loadBenchmarkText()) }
             var benchmarking by remember { mutableStateOf(false) }
+            var rankMode by remember { mutableStateOf("all") }
             var leaderboard by remember { mutableStateOf(defaultLeaderboardText()) }
             var update by remember { mutableStateOf(UpdateState()) }
 
@@ -120,7 +122,7 @@ class ModernActivity : ComponentActivity() {
                 checkForUpdates(ui.version) { update = it }
             }
             fun refreshLeaderboard() {
-                fetchLeaderboard { leaderboard = it }
+                fetchLeaderboard(rankMode) { leaderboard = it }
             }
 
             DisposableEffect(Unit) {
@@ -154,6 +156,9 @@ class ModernActivity : ComponentActivity() {
 
             LaunchedEffect(Unit) {
                 refreshUpdate()
+            }
+
+            LaunchedEffect(rankMode) {
                 refreshLeaderboard()
             }
 
@@ -163,9 +168,11 @@ class ModernActivity : ComponentActivity() {
                     update = update,
                     page = page,
                     benchmark = benchmark,
+                    rankMode = rankMode,
                     leaderboard = leaderboard,
                     benchmarking = benchmarking,
                     onPage = { page = it },
+                    onRankMode = { rankMode = it },
                     onOpenUpdate = { openRelease(update) },
                     onStart = {
                         if (startBtcrigService()) {
@@ -491,16 +498,17 @@ class ModernActivity : ComponentActivity() {
     private fun defaultLeaderboardText(): String =
         "${getString(R.string.leaderboard)}\n${getString(R.string.leaderboard_loading)}"
 
-    private fun fetchLeaderboard(onResult: (String) -> Unit) {
+    private fun fetchLeaderboard(mode: String, onResult: (String) -> Unit) {
         Thread {
-            val text = runCatching { leaderboardText() }
+            val text = runCatching { leaderboardText(mode) }
                 .getOrElse { "${getString(R.string.leaderboard)}\n${getString(R.string.leaderboard_load_failed, it.message ?: it.javaClass.simpleName)}" }
             runOnUiThread { onResult(text) }
         }.start()
     }
 
-    private fun leaderboardText(): String {
-        val connection = (URL("$RANK_API_BASE_URL/leaderboard?mode=all").openConnection() as HttpURLConnection).apply {
+    private fun leaderboardText(mode: String): String {
+        val apiMode = rankModeApi(mode)
+        val connection = (URL("$RANK_API_BASE_URL/leaderboard?mode=$apiMode").openConnection() as HttpURLConnection).apply {
             connectTimeout = 7000
             readTimeout = 7000
             setRequestProperty("Accept", "application/json")
@@ -511,20 +519,38 @@ class ModernActivity : ComponentActivity() {
             val rows = JSONObject(connection.inputStream.bufferedReader().use { it.readText() }).optJSONArray("rows") ?: JSONArray()
             if (rows.length() == 0) return "${getString(R.string.leaderboard)}\n${getString(R.string.leaderboard_empty)}"
             buildString {
-                appendLine(getString(R.string.leaderboard))
+                appendLine("${getString(R.string.leaderboard)} · ${rankModeLabel(apiMode)}")
                 for (i in 0 until minOf(rows.length(), 10)) {
                     val row = rows.getJSONObject(i)
                     val name = row.optString("soc_name").ifBlank { row.optString("device_name") }.ifBlank { row.optString("gpu_name") }
+                    val rate = when (apiMode) {
+                        "cpu" -> row.optDouble("cpu_hashrate")
+                        "gpu" -> row.optDouble("gpu_hashrate")
+                        "cpu_gpu" -> row.optDouble("cpu_gpu_hashrate")
+                        else -> row.optDouble("max_hashrate")
+                    }
                     append('#').append(row.optInt("rank", i + 1)).append(' ')
                     appendLine(name.ifBlank { getString(R.string.unknown_device) })
                     append("  ")
-                    append(getString(R.string.leaderboard_best, formatHashrate(row.optDouble("max_hashrate")), row.optString("recommended", "--")))
+                    append(getString(R.string.leaderboard_best, formatHashrate(rate), row.optString("recommended", "--")))
                     appendLine()
                 }
             }.trimEnd()
         } finally {
             connection.disconnect()
         }
+    }
+
+    private fun rankModeApi(mode: String): String = when (mode) {
+        "cpu", "gpu", "cpu_gpu" -> mode
+        else -> "all"
+    }
+
+    private fun rankModeLabel(mode: String): String = when (rankModeApi(mode)) {
+        "cpu" -> getString(R.string.rank_cpu)
+        "gpu" -> getString(R.string.rank_gpu)
+        "cpu_gpu" -> getString(R.string.rank_cpu_gpu)
+        else -> getString(R.string.rank_general)
     }
 
     private fun submitBenchmark(cpuHps: Double, gpuHps: Double, cpuGpuHps: Double): String {
@@ -683,9 +709,13 @@ private fun HomePreview() = PreviewScreen(0)
 @Composable
 private fun SettingsPreview() = PreviewScreen(1)
 
+@Preview(name = "Rank", showBackground = true, widthDp = 390, heightDp = 844)
+@Composable
+private fun RankPreview() = PreviewScreen(2)
+
 @Preview(name = "Info", showBackground = true, widthDp = 390, heightDp = 844)
 @Composable
-private fun InfoPreview() = PreviewScreen(2)
+private fun InfoPreview() = PreviewScreen(3)
 
 @Composable
 private fun PreviewScreen(page: Int) {
@@ -695,9 +725,11 @@ private fun PreviewScreen(page: Int) {
             update = UpdateState(latestVersion = "0.1.3", available = true),
             page = page,
             benchmark = "Benchmark\nCPU full cores: 8\n\nCPU: --\nGPU: --\nCPU + GPU: --",
+            rankMode = "all",
             leaderboard = "Leaderboard\n#1 QTI SM8650\n  Best: 141.30 MH/s · CPU+GPU",
             benchmarking = false,
             onPage = {},
+            onRankMode = {},
             onOpenUpdate = {},
             onStart = {},
             onStop = {},
@@ -717,9 +749,11 @@ private fun BtcrigScreen(
     update: UpdateState,
     page: Int,
     benchmark: String,
+    rankMode: String,
     leaderboard: String,
     benchmarking: Boolean,
     onPage: (Int) -> Unit,
+    onRankMode: (String) -> Unit,
     onOpenUpdate: () -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
@@ -763,7 +797,16 @@ private fun BtcrigScreen(
                                 verticalArrangement = Arrangement.spacedBy(16.dp),
                             ) {
                                 PageHeader()
-                                InfoPage(ui, update, benchmark, leaderboard, benchmarking, onBenchmark, onLog, basic, onBasicChange)
+                                RankPage(leaderboard, rankMode, onRankMode)
+                            }
+                        }
+                        3 -> {
+                            Column(
+                                modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.spacedBy(16.dp),
+                            ) {
+                                PageHeader()
+                                InfoPage(ui, update, benchmark, benchmarking, onBenchmark, onLog, basic, onBasicChange)
                             }
                         }
                         else -> HomePage(
@@ -803,6 +846,7 @@ private fun BottomNav(page: Int, onPage: (Int) -> Unit) {
                 listOf(
                     stringResource(R.string.tab_home),
                     stringResource(R.string.tab_settings),
+                    stringResource(R.string.tab_rank),
                     stringResource(R.string.tab_info),
                 ).forEachIndexed { index, title ->
                     Column(
@@ -1247,7 +1291,6 @@ private fun InfoPage(
     ui: UiState,
     update: UpdateState,
     benchmark: String,
-    leaderboard: String,
     benchmarking: Boolean,
     onBenchmark: () -> Unit,
     onLog: () -> Unit,
@@ -1261,7 +1304,6 @@ private fun InfoPage(
         enabled = !benchmarking && !ui.running
     )
     BenchmarkBox(benchmark)
-    BenchmarkBox(leaderboard)
     RigButton(text = stringResource(R.string.view_log), onClick = onLog)
     SoftCard(compact = true) {
         Line(updateText(update))
@@ -1276,6 +1318,46 @@ private fun InfoPage(
         enabled = !ui.running,
         onChange = { onBasicChange(basic.copyBasic(donationPercent = it)) },
     )
+}
+
+@Composable
+private fun RankPage(
+    leaderboard: String,
+    rankMode: String,
+    onRankMode: (String) -> Unit,
+) {
+    Text(stringResource(R.string.leaderboard), color = RigBlue, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        listOf(
+            "cpu" to stringResource(R.string.rank_cpu),
+            "gpu" to stringResource(R.string.rank_gpu),
+            "cpu_gpu" to stringResource(R.string.rank_cpu_gpu),
+            "all" to stringResource(R.string.rank_general),
+        ).forEach { (mode, label) ->
+            RankModeButton(label, rankMode == mode) { onRankMode(mode) }
+        }
+    }
+    BenchmarkBox(leaderboard)
+}
+
+@Composable
+private fun RowScope.RankModeButton(text: String, selected: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        modifier = Modifier.weight(1f),
+        shape = RoundedCornerShape(999.dp),
+        color = if (selected) SoftBlue else Color.White,
+        border = androidx.compose.foundation.BorderStroke(1.dp, if (selected) RigBlue else Color(0xFFE2E5EC)),
+    ) {
+        Text(
+            text,
+            modifier = Modifier.padding(vertical = 9.dp),
+            textAlign = TextAlign.Center,
+            color = if (selected) Accent else Muted,
+            fontSize = 13.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+        )
+    }
 }
 
 @Composable

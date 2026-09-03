@@ -131,7 +131,6 @@ private fun PreviewScreen(page: Int) {
             update = UpdateState(latestVersion = "0.1.3", available = true),
             page = page,
             benchmark = "Benchmark\nCPU full cores: 8\n\nCPU: --\nGPU: --\nCPU + GPU: --",
-            uploadedBenchmark = "",
             rankMode = "all",
             leaderboard = RankUi(
                 "all",
@@ -162,7 +161,6 @@ internal fun BtcrigScreen(
     update: UpdateState,
     page: Int,
     benchmark: String,
-    uploadedBenchmark: String,
     rankMode: String,
     leaderboard: RankUi,
     benchmarking: Boolean,
@@ -213,7 +211,7 @@ internal fun BtcrigScreen(
                                 verticalArrangement = Arrangement.spacedBy(16.dp),
                             ) {
                                 PageHeader()
-                                InfoPage(ui, update, benchmark, uploadedBenchmark, benchmarking, uploadingBenchmark, onBenchmark, onUploadBenchmark, onLog, basic, onBasicChange)
+                                InfoPage(ui, update, benchmark, benchmarking, uploadingBenchmark, onBenchmark, onUploadBenchmark, onLog, basic, onBasicChange)
                             }
                         }
                         3 -> {
@@ -707,7 +705,6 @@ private fun InfoPage(
     ui: UiState,
     update: UpdateState,
     benchmark: String,
-    uploadedBenchmark: String,
     benchmarking: Boolean,
     uploadingBenchmark: Boolean,
     onBenchmark: () -> Unit,
@@ -730,9 +727,6 @@ private fun InfoPage(
         )
     }
     BenchmarkBox(benchmark)
-    if (uploadedBenchmark.isNotBlank()) {
-        Line(uploadedBenchmark)
-    }
     RigButton(text = stringResource(R.string.view_log), onClick = onLog)
     SoftCard(compact = true) {
         Line(updateText(update))
@@ -972,13 +966,17 @@ private fun DonationCard(percent: Int, enabled: Boolean, onChange: (Int) -> Unit
 
 @Composable
 private fun BenchmarkBox(text: String) {
+    val scroll = rememberScrollState()
+    LaunchedEffect(text, scroll.maxValue) {
+        scroll.scrollTo(scroll.maxValue)
+    }
     SoftCard(compact = true) {
         Text(
             text,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(144.dp)
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(scroll),
             color = MaterialTheme.colorScheme.secondary,
             fontFamily = FontFamily.Monospace,
             fontSize = 14.sp,

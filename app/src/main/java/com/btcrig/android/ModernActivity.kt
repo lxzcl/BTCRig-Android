@@ -49,8 +49,7 @@ class ModernActivity : ComponentActivity() {
             var showLog by remember { mutableStateOf(false) }
             var logText by remember { mutableStateOf("") }
             var basic by remember { mutableStateOf(readBasic()) }
-            var benchmark by remember { mutableStateOf(loadBenchmarkText()) }
-            var uploadedBenchmark by remember { mutableStateOf(loadBenchmarkUploadStatus()) }
+            var benchmark by remember { mutableStateOf(loadBenchmarkDisplayText()) }
             var benchmarking by remember { mutableStateOf(false) }
             var uploadingBenchmark by remember { mutableStateOf(false) }
             var rankMode by remember { mutableStateOf("all") }
@@ -70,8 +69,7 @@ class ModernActivity : ComponentActivity() {
                     basic = readBasic()
                     ui = readUi()
                     if (!benchmarking && !uploadingBenchmark) {
-                        benchmark = loadBenchmarkText()
-                        uploadedBenchmark = loadBenchmarkUploadStatus()
+                        benchmark = loadBenchmarkDisplayText()
                     }
                     refreshUpdate()
                 }
@@ -107,8 +105,7 @@ class ModernActivity : ComponentActivity() {
 
             LaunchedEffect(page) {
                 if (page == 2 && !benchmarking && !uploadingBenchmark) {
-                    benchmark = loadBenchmarkText()
-                    uploadedBenchmark = loadBenchmarkUploadStatus()
+                    benchmark = loadBenchmarkDisplayText()
                 }
             }
 
@@ -118,7 +115,6 @@ class ModernActivity : ComponentActivity() {
                     update = update,
                     page = page,
                     benchmark = benchmark,
-                    uploadedBenchmark = uploadedBenchmark,
                     rankMode = rankMode,
                     leaderboard = leaderboard,
                     benchmarking = benchmarking,
@@ -150,7 +146,6 @@ class ModernActivity : ComponentActivity() {
                             return@BtcrigScreen
                         }
                         benchmarking = true
-                        uploadedBenchmark = ""
                         saveBenchmarkUploadStatus("")
                         val configPath = runCatching { BtcrigConfig.ensure(this).absolutePath }.getOrDefault("")
                         val threads = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
@@ -200,8 +195,7 @@ class ModernActivity : ComponentActivity() {
                             saveBenchmarkUploadStatus(status)
                             runOnUiThread {
                                 uploadingBenchmark = false
-                                uploadedBenchmark = status
-                                benchmark = loadBenchmarkText()
+                                benchmark = benchmarkTextWithUpload(loadBenchmarkText(), status)
                                 refreshLeaderboard()
                             }
                         }.start()
@@ -391,6 +385,12 @@ class ModernActivity : ComponentActivity() {
     private fun saveBenchmarkUploadStatus(text: String) {
         getSharedPreferences("benchmark", MODE_PRIVATE).edit().putString("upload_status", text).apply()
     }
+
+    private fun loadBenchmarkDisplayText(): String =
+        benchmarkTextWithUpload(loadBenchmarkText(), loadBenchmarkUploadStatus())
+
+    private fun benchmarkTextWithUpload(text: String, uploadStatus: String): String =
+        listOf(text.trimEnd(), uploadStatus.trim()).filter { it.isNotBlank() }.joinToString("\n")
 
     private fun installId(): String {
         val prefs = getSharedPreferences("rank", MODE_PRIVATE)

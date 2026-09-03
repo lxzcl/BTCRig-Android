@@ -84,6 +84,7 @@ private val SoftBlue = Color(0xFFE8EDF8)
 private val CardFill = Color(0xFFEFF1F7)
 private val FieldFill = Color.Transparent
 internal const val BENCHMARK_SECONDS = 3
+internal const val UPLOAD_BENCHMARK_SECONDS = 10
 internal val DONATION_LEVELS = listOf(0, 1, 3, 5, 99)
 internal const val RANK_API_BASE_URL = "https://www.btcrig.net/api/v1"
 internal const val UPDATE_API_URL = "https://api.github.com/repos/lxzcl/BTCRig-Android/releases/latest"
@@ -130,6 +131,7 @@ private fun PreviewScreen(page: Int) {
             update = UpdateState(latestVersion = "0.1.3", available = true),
             page = page,
             benchmark = "Benchmark\nCPU full cores: 8\n\nCPU: --\nGPU: --\nCPU + GPU: --",
+            uploadedBenchmark = "",
             rankMode = "all",
             leaderboard = RankUi(
                 "all",
@@ -137,12 +139,14 @@ private fun PreviewScreen(page: Int) {
                 me = RankUiRow(12, "QTI SM8650 · Adreno(TM) 750", "141.30 MH/s"),
             ),
             benchmarking = false,
+            uploadingBenchmark = false,
             onPage = {},
             onRankMode = {},
             onOpenUpdate = {},
             onStart = {},
             onStop = {},
             onBenchmark = {},
+            onUploadBenchmark = {},
             basic = previewBasic(),
             onBasicChange = {},
             onBatteryOptimization = {},
@@ -158,15 +162,18 @@ internal fun BtcrigScreen(
     update: UpdateState,
     page: Int,
     benchmark: String,
+    uploadedBenchmark: String,
     rankMode: String,
     leaderboard: RankUi,
     benchmarking: Boolean,
+    uploadingBenchmark: Boolean,
     onPage: (Int) -> Unit,
     onRankMode: (String) -> Unit,
     onOpenUpdate: () -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onBenchmark: () -> Unit,
+    onUploadBenchmark: () -> Unit,
     basic: BtcrigConfig.Basic,
     onBasicChange: (BtcrigConfig.Basic) -> Unit,
     onBatteryOptimization: () -> Unit,
@@ -206,7 +213,7 @@ internal fun BtcrigScreen(
                                 verticalArrangement = Arrangement.spacedBy(16.dp),
                             ) {
                                 PageHeader()
-                                InfoPage(ui, update, benchmark, benchmarking, onBenchmark, onLog, basic, onBasicChange)
+                                InfoPage(ui, update, benchmark, uploadedBenchmark, benchmarking, uploadingBenchmark, onBenchmark, onUploadBenchmark, onLog, basic, onBasicChange)
                             }
                         }
                         3 -> {
@@ -700,19 +707,32 @@ private fun InfoPage(
     ui: UiState,
     update: UpdateState,
     benchmark: String,
+    uploadedBenchmark: String,
     benchmarking: Boolean,
+    uploadingBenchmark: Boolean,
     onBenchmark: () -> Unit,
+    onUploadBenchmark: () -> Unit,
     onLog: () -> Unit,
     basic: BtcrigConfig.Basic,
     onBasicChange: (BtcrigConfig.Basic) -> Unit,
 ) {
     Text(stringResource(R.string.info_title), color = RigBlue, fontSize = 13.sp, fontWeight = FontWeight.Medium)
-    RigButton(
-        text = if (benchmarking) stringResource(R.string.benchmarking) else stringResource(R.string.benchmark),
-        onClick = onBenchmark,
-        enabled = !benchmarking && !ui.running
-    )
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        RigButton(
+            text = if (benchmarking) stringResource(R.string.benchmarking) else stringResource(R.string.benchmark),
+            onClick = onBenchmark,
+            enabled = !benchmarking && !uploadingBenchmark && !ui.running
+        )
+        RigButton(
+            text = if (uploadingBenchmark) stringResource(R.string.uploading_score) else stringResource(R.string.upload_score),
+            onClick = onUploadBenchmark,
+            enabled = !benchmarking && !uploadingBenchmark && !ui.running
+        )
+    }
     BenchmarkBox(benchmark)
+    if (uploadedBenchmark.isNotBlank()) {
+        Line(uploadedBenchmark)
+    }
     RigButton(text = stringResource(R.string.view_log), onClick = onLog)
     SoftCard(compact = true) {
         Line(updateText(update))
@@ -1065,4 +1085,3 @@ internal fun TextDialog(title: String, text: String, onCopy: () -> Unit, onDismi
         confirmButton = { Button(onClick = onDismiss) { Text(stringResource(R.string.close)) } },
     )
 }
-

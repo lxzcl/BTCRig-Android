@@ -50,7 +50,9 @@ class ModernActivity : ComponentActivity() {
             var logText by remember { mutableStateOf("") }
             var basic by remember { mutableStateOf(readBasic()) }
             var benchmark by remember { mutableStateOf(loadBenchmarkText()) }
+            var uploadedBenchmark by remember { mutableStateOf(loadBenchmarkUploadStatus()) }
             var benchmarking by remember { mutableStateOf(false) }
+            var uploadingBenchmark by remember { mutableStateOf(false) }
             var rankMode by remember { mutableStateOf("all") }
             var leaderboard by remember { mutableStateOf(defaultLeaderboard()) }
             var update by remember { mutableStateOf(UpdateState()) }
@@ -67,6 +69,10 @@ class ModernActivity : ComponentActivity() {
                     serviceState = ""
                     basic = readBasic()
                     ui = readUi()
+                    if (!benchmarking && !uploadingBenchmark) {
+                        benchmark = loadBenchmarkText()
+                        uploadedBenchmark = loadBenchmarkUploadStatus()
+                    }
                     refreshUpdate()
                 }
                 onDispose { refreshUi = null }
@@ -99,15 +105,24 @@ class ModernActivity : ComponentActivity() {
                 refreshLeaderboard()
             }
 
+            LaunchedEffect(page) {
+                if (page == 2 && !benchmarking && !uploadingBenchmark) {
+                    benchmark = loadBenchmarkText()
+                    uploadedBenchmark = loadBenchmarkUploadStatus()
+                }
+            }
+
             BtcrigTheme {
                 BtcrigScreen(
                     ui = ui,
                     update = update,
                     page = page,
                     benchmark = benchmark,
+                    uploadedBenchmark = uploadedBenchmark,
                     rankMode = rankMode,
                     leaderboard = leaderboard,
                     benchmarking = benchmarking,
+                    uploadingBenchmark = uploadingBenchmark,
                     onPage = { page = it },
                     onRankMode = { rankMode = it },
                     onOpenUpdate = { openRelease(update) },
@@ -135,6 +150,8 @@ class ModernActivity : ComponentActivity() {
                             return@BtcrigScreen
                         }
                         benchmarking = true
+                        uploadedBenchmark = ""
+                        saveBenchmarkUploadStatus("")
                         val configPath = runCatching { BtcrigConfig.ensure(this).absolutePath }.getOrDefault("")
                         val threads = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
                         val benchmarkTitle = getString(R.string.benchmark)
@@ -158,15 +175,33 @@ class ModernActivity : ComponentActivity() {
                             showTesting("CPU + GPU")
                             val cpuGpuHps = if (gpuHps >= 0.0) BtcrigNative.benchmarkCpuGpu(configPath, BENCHMARK_SECONDS, threads) else -1.0
                             lines.add(getString(R.string.benchmark_backend_value, "CPU + GPU", if (cpuGpuHps >= 0.0) formatHashrate(cpuGpuHps) else unavailable))
-                            val submitText = runCatching { submitBenchmark(cpuHps, gpuHps, cpuGpuHps) }
-                                .getOrElse { error -> getString(R.string.leaderboard_upload_failed, error.message ?: error.javaClass.simpleName) }
-                            lines.add("")
-                            lines.add(submitText)
                             val result = lines.joinToString("\n")
                             saveBenchmarkText(result)
                             runOnUiThread {
                                 benchmarking = false
                                 benchmark = result
+                                refreshLeaderboard()
+                            }
+                        }.start()
+                    },
+                    onUploadBenchmark = {
+                        if (ui.running) {
+                            toast(getString(R.string.stop_mining_before_benchmark))
+                            return@BtcrigScreen
+                        }
+                        uploadingBenchmark = true
+                        benchmark = getString(R.string.benchmark_upload_start)
+                        Thread {
+                            val status = runCatching {
+                                runChallengeUpload { text -> runOnUiThread { benchmark = text } }
+                            }.getOrElse { error ->
+                                getString(R.string.leaderboard_upload_failed, error.message ?: error.javaClass.simpleName)
+                            }
+                            saveBenchmarkUploadStatus(status)
+                            runOnUiThread {
+                                uploadingBenchmark = false
+                                uploadedBenchmark = status
+                                benchmark = loadBenchmarkText()
                                 refreshLeaderboard()
                             }
                         }.start()
@@ -350,6 +385,13 @@ class ModernActivity : ComponentActivity() {
         getSharedPreferences("benchmark", MODE_PRIVATE).edit().putString("last_text", text).apply()
     }
 
+    private fun loadBenchmarkUploadStatus(): String =
+        getSharedPreferences("benchmark", MODE_PRIVATE).getString("upload_status", "").orEmpty()
+
+    private fun saveBenchmarkUploadStatus(text: String) {
+        getSharedPreferences("benchmark", MODE_PRIVATE).edit().putString("upload_status", text).apply()
+    }
+
     private fun installId(): String {
         val prefs = getSharedPreferences("rank", MODE_PRIVATE)
         return prefs.getString("install_id", null) ?: UUID.randomUUID().toString().also {
@@ -431,6 +473,57 @@ class ModernActivity : ComponentActivity() {
             getString(R.string.benchmark_backend_value, "GPU", "--"),
             getString(R.string.benchmark_backend_value, "CPU + GPU", "--"),
         ).joinToString("\n")
+
+    private fun benchmarkScoreSummary(result: BenchmarkResult): String =
+        listOf(
+            "CPU ${benchmarkRateText(result.cpuHps)}",
+            "GPU ${benchmarkRateText(result.gpuHps)}",
+            "CPU+GPU ${benchmarkRateText(result.cpuGpuHps)}",
+        ).joinToString(" / ")
+
+    private fun benchmarkRateText(rate: Double): String =
+        if (rate >= 0.0) formatHashrate(rate) else getString(R.string.unavailable)
+
+    private fun runChallengeUpload(onText: (String) -> Unit): String {
+        val lines = mutableListOf(
+            getString(R.string.upload_score),
+            getString(R.string.benchmark_estimated_time),
+            getString(R.string.benchmark_keep_open),
+            "",
+            getString(R.string.benchmark_challenge_requesting),
+        )
+        fun show(line: String) {
+            lines.add(line)
+            onText(lines.joinToString("\n"))
+        }
+
+        onText(lines.joinToString("\n"))
+        val appSig = appSignatureHash()
+        val challenge = createBenchmarkChallenge(appSig)
+        show(getString(R.string.benchmark_challenge_ready))
+        startBenchmarkChallenge(challenge)
+        show(getString(R.string.benchmark_challenge_started))
+
+        val configPath = runCatching { BtcrigConfig.ensure(this).absolutePath }.getOrDefault("")
+        val threads = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+        val seconds = challenge.seconds.coerceAtLeast(UPLOAD_BENCHMARK_SECONDS)
+        val startNs = System.nanoTime()
+        show(getString(R.string.benchmark_backend_value, "CPU", getString(R.string.testing)))
+        val cpuHps = BtcrigNative.benchmarkCpu(seconds, threads)
+        show(getString(R.string.benchmark_backend_value, "CPU", benchmarkRateText(cpuHps)))
+        show(getString(R.string.benchmark_backend_value, "GPU", getString(R.string.testing)))
+        val gpuHps = BtcrigNative.benchmarkOpencl(configPath, seconds)
+        show(getString(R.string.benchmark_backend_value, "GPU", benchmarkRateText(gpuHps)))
+        show(getString(R.string.benchmark_backend_value, "CPU + GPU", getString(R.string.testing)))
+        val cpuGpuHps = if (gpuHps >= 0.0) BtcrigNative.benchmarkCpuGpu(configPath, seconds, threads) else -1.0
+        show(getString(R.string.benchmark_backend_value, "CPU + GPU", benchmarkRateText(cpuGpuHps)))
+
+        val elapsedMs = (System.nanoTime() - startNs) / 1_000_000
+        val result = BenchmarkResult(cpuHps, gpuHps, cpuGpuHps)
+        show(getString(R.string.benchmark_challenge_submitting))
+        val submit = finishBenchmarkChallenge(challenge, result, appSig, elapsedMs)
+        return if (submit.accepted) getString(R.string.benchmark_uploaded_score, benchmarkScoreSummary(result)) else submit.text
+    }
 
     private fun defaultLeaderboard(): RankUi =
         RankUi(getString(R.string.leaderboard), getString(R.string.leaderboard_loading))
@@ -553,12 +646,44 @@ class ModernActivity : ComponentActivity() {
         .replace("OpenCL ", "", ignoreCase = true)
         .trim()
 
-    private fun submitBenchmark(cpuHps: Double, gpuHps: Double, cpuGpuHps: Double): String {
+    private fun createBenchmarkChallenge(appSig: String): BenchmarkChallenge {
+        val res = postJson(
+            "$RANK_API_BASE_URL/benchmark-challenges",
+            JSONObject()
+                .put("install_id", installId())
+                .put("app_signature_hash", appSig),
+        )
+        val challenge = BenchmarkChallenge(
+            res.optString("id"),
+            res.optString("seed"),
+            res.optString("token"),
+            res.optInt("seconds", UPLOAD_BENCHMARK_SECONDS),
+        )
+        if (challenge.id.isBlank() || challenge.seed.isBlank() || challenge.token.isBlank()) {
+            throw IllegalStateException("bad challenge response")
+        }
+        return challenge
+    }
+
+    private fun startBenchmarkChallenge(challenge: BenchmarkChallenge) {
+        postJson(
+            "$RANK_API_BASE_URL/benchmark-challenges/${challenge.id}/start",
+            JSONObject().put("token", challenge.token),
+        )
+    }
+
+    private fun finishBenchmarkChallenge(
+        challenge: BenchmarkChallenge,
+        result: BenchmarkResult,
+        appSig: String,
+        elapsedMs: Long,
+    ): SubmitResult {
         val opencl = BtcrigNative.openclStatus(runCatching { BtcrigConfig.ensure(this).absolutePath }.getOrDefault(""))
         val gpu = parseOpencl(opencl)
         val installId = installId()
         val nonce = "${System.currentTimeMillis()}-${UUID.randomUUID()}"
         val threads = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+        val checksum = challengeChecksum(challenge, result, appSig, threads, elapsedMs)
         val json = JSONObject()
             .put("app_version", versionName())
             .put("android_version", "${Build.VERSION.RELEASE} API ${Build.VERSION.SDK_INT}")
@@ -572,39 +697,72 @@ class ModernActivity : ComponentActivity() {
             .put("cpu_cores", threads)
             .put("gpu_name", gpu.name)
             .put("opencl_version", gpu.version)
-            .put("cpu_hashrate", cpuHps.coerceAtLeast(0.0))
-            .put("gpu_hashrate", gpuHps.coerceAtLeast(0.0))
-            .put("cpu_gpu_hashrate", cpuGpuHps.coerceAtLeast(0.0))
-            .put("duration_sec", BENCHMARK_SECONDS)
+            .put("cpu_hashrate", result.cpuHps.coerceAtLeast(0.0))
+            .put("gpu_hashrate", result.gpuHps.coerceAtLeast(0.0))
+            .put("cpu_gpu_hashrate", result.cpuGpuHps.coerceAtLeast(0.0))
+            .put("duration_sec", challenge.seconds)
             .put("benchmark_threads", threads)
             .put("install_id", installId)
-            .put("app_signature_hash", appSignatureHash())
+            .put("app_signature_hash", appSig)
             .put("nonce", nonce)
+            .put("challenge_token", challenge.token)
+            .put("challenge_checksum", checksum)
+            .put("challenge_elapsed_ms", elapsedMs)
+        val res = postJson("$RANK_API_BASE_URL/benchmark-challenges/${challenge.id}/finish", json, installId)
+        return if (res.optBoolean("accepted")) SubmitResult(true, getString(R.string.leaderboard_uploaded))
+        else SubmitResult(false, getString(R.string.leaderboard_rejected, res.optString("reject_reason", "rejected")))
+    }
+
+    private fun postJson(url: String, json: JSONObject, signatureKey: String = ""): JSONObject {
         val body = json.toString().toByteArray(Charsets.UTF_8)
-        val connection = (URL("$RANK_API_BASE_URL/benchmarks").openConnection() as HttpURLConnection).apply {
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 7000
-            readTimeout = 7000
+            readTimeout = 15000
             doOutput = true
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("Accept", "application/json")
             setRequestProperty("User-Agent", "BTCRig-Android")
-            setRequestProperty("X-BTCRig-Signature", hmacSha256Hex(installId, body))
+            if (signatureKey.isNotBlank()) {
+                setRequestProperty("X-BTCRig-Signature", hmacSha256Hex(signatureKey, body))
+            }
         }
         return try {
             connection.outputStream.use { it.write(body) }
-            val body = (if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream)
+            val text = (if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream)
                 ?.bufferedReader()
                 ?.use { it.readText() }
                 .orEmpty()
-            if (connection.responseCode !in 200..299) throw IllegalStateException("HTTP ${connection.responseCode}: $body")
-            val res = JSONObject(body)
-            if (res.optBoolean("accepted")) getString(R.string.leaderboard_uploaded)
-            else getString(R.string.leaderboard_rejected, res.optString("reject_reason", "rejected"))
+            if (connection.responseCode !in 200..299) throw IllegalStateException("HTTP ${connection.responseCode}: $text")
+            JSONObject(text)
         } finally {
             connection.disconnect()
         }
     }
+
+    private fun challengeChecksum(
+        challenge: BenchmarkChallenge,
+        result: BenchmarkResult,
+        appSig: String,
+        threads: Int,
+        elapsedMs: Long,
+    ): String = sha256Hex(
+        listOf(
+            "btcrig-challenge-v1",
+            challenge.id,
+            challenge.seed,
+            appSig,
+            challenge.seconds.toString(),
+            threads.toString(),
+            elapsedMs.toString(),
+            challengeRate(result.cpuHps),
+            challengeRate(result.gpuHps),
+            challengeRate(result.cpuGpuHps),
+        ).joinToString("\n").toByteArray(Charsets.UTF_8)
+    )
+
+    private fun challengeRate(rate: Double): String =
+        String.format(Locale.US, "%.3f", rate.coerceAtLeast(0.0))
 
     private fun appSignatureHash(): String = runCatching {
         val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {

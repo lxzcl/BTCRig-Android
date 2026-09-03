@@ -33,6 +33,21 @@ internal data class ReleaseInfo(val version: String, val url: String)
 
 internal data class OpenclInfo(val name: String, val version: String)
 
+internal data class BenchmarkResult(
+    val cpuHps: Double,
+    val gpuHps: Double,
+    val cpuGpuHps: Double,
+)
+
+internal data class SubmitResult(val accepted: Boolean, val text: String)
+
+internal data class BenchmarkChallenge(
+    val id: String,
+    val seed: String,
+    val token: String,
+    val seconds: Int,
+)
+
 internal data class RankUi(
     val title: String,
     val message: String = "",
@@ -41,4 +56,3 @@ internal data class RankUi(
 )
 
 internal data class RankUiRow(val rank: Int, val name: String, val rate: String, val detail: String = "")
-

@@ -95,8 +95,11 @@ import java.io.File
 import java.io.FileInputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 import java.util.Locale
 import java.util.UUID
+import javax.crypto.Mac
+import javax.crypto.spec.SecretKeySpec
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -554,7 +557,41 @@ class ModernActivity : ComponentActivity() {
                 else -> row.optDouble("max_hashrate")
             }
         }
-        return RankUiRow(row.optInt("rank", fallbackRank), name.ifBlank { getString(R.string.unknown_device) }, formatHashrate(rate))
+        return RankUiRow(
+            row.optInt("rank", fallbackRank),
+            name.ifBlank { getString(R.string.unknown_device) },
+            formatHashrate(rate),
+            rankDetail(row, name, rate),
+        )
+    }
+
+    private fun rankDetail(row: JSONObject, name: String, rate: Double): String {
+        fun line(label: Int, value: String): String =
+            getString(R.string.rank_detail_line, getString(label), value.ifBlank { "--" })
+        val samples = row.optInt("samples", 0)
+        val signed = row.optInt("signed_samples", 0)
+        val signHash = row.optString("app_signature_hash").take(16).ifBlank { "--" }
+        return listOf(
+            line(R.string.rank_detail_rank, "#${row.optInt("rank")}"),
+            line(R.string.rank_detail_score, formatHashrate(rate)),
+            line(R.string.rank_detail_recommended, row.optString("recommended")),
+            line(R.string.rank_detail_samples, samples.toString()),
+            line(R.string.rank_detail_signed_samples, "$signed/$samples"),
+            line(R.string.rank_detail_device, row.optString("device_name").ifBlank { name }),
+            line(R.string.rank_detail_soc, row.optString("soc_name")),
+            line(R.string.rank_detail_gpu, shortGpuName(row.optString("gpu_name"))),
+            line(R.string.rank_detail_cpu, formatHashrate(row.optDouble("cpu_hashrate"))),
+            line(R.string.rank_detail_opencl, formatHashrate(row.optDouble("gpu_hashrate"))),
+            line(R.string.rank_detail_cpu_gpu, formatHashrate(row.optDouble("cpu_gpu_hashrate"))),
+            line(R.string.rank_detail_cpu_cores, row.optInt("cpu_cores", 0).toString()),
+            line(R.string.rank_detail_threads, row.optInt("benchmark_threads", 0).toString()),
+            line(R.string.rank_detail_abi, row.optString("cpu_abi")),
+            line(R.string.rank_detail_opencl_version, row.optString("opencl_version")),
+            line(R.string.rank_detail_android, row.optString("android_version")),
+            line(R.string.rank_detail_app, row.optString("app_version")),
+            line(R.string.rank_detail_signature, signHash),
+            line(R.string.rank_detail_last_seen, row.optString("last_seen")),
+        ).joinToString("\n")
     }
 
     private fun rankModeApi(mode: String): String = when (mode) {
@@ -589,6 +626,9 @@ class ModernActivity : ComponentActivity() {
     private fun submitBenchmark(cpuHps: Double, gpuHps: Double, cpuGpuHps: Double): String {
         val opencl = BtcrigNative.openclStatus(runCatching { BtcrigConfig.ensure(this).absolutePath }.getOrDefault(""))
         val gpu = parseOpencl(opencl)
+        val installId = installId()
+        val nonce = "${System.currentTimeMillis()}-${UUID.randomUUID()}"
+        val threads = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
         val json = JSONObject()
             .put("app_version", versionName())
             .put("android_version", "${Build.VERSION.RELEASE} API ${Build.VERSION.SDK_INT}")
@@ -599,14 +639,18 @@ class ModernActivity : ComponentActivity() {
             .put("soc_manufacturer", if (Build.VERSION.SDK_INT >= 31) Build.SOC_MANUFACTURER else "")
             .put("soc_model", if (Build.VERSION.SDK_INT >= 31) Build.SOC_MODEL else Build.HARDWARE)
             .put("cpu_abi", Build.SUPPORTED_ABIS.firstOrNull().orEmpty())
-            .put("cpu_cores", Runtime.getRuntime().availableProcessors().coerceAtLeast(1))
+            .put("cpu_cores", threads)
             .put("gpu_name", gpu.name)
             .put("opencl_version", gpu.version)
             .put("cpu_hashrate", cpuHps.coerceAtLeast(0.0))
             .put("gpu_hashrate", gpuHps.coerceAtLeast(0.0))
             .put("cpu_gpu_hashrate", cpuGpuHps.coerceAtLeast(0.0))
             .put("duration_sec", BENCHMARK_SECONDS)
-            .put("install_id", installId())
+            .put("benchmark_threads", threads)
+            .put("install_id", installId)
+            .put("app_signature_hash", appSignatureHash())
+            .put("nonce", nonce)
+        val body = json.toString().toByteArray(Charsets.UTF_8)
         val connection = (URL("$RANK_API_BASE_URL/benchmarks").openConnection() as HttpURLConnection).apply {
             requestMethod = "POST"
             connectTimeout = 7000
@@ -615,9 +659,10 @@ class ModernActivity : ComponentActivity() {
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("Accept", "application/json")
             setRequestProperty("User-Agent", "BTCRig-Android")
+            setRequestProperty("X-BTCRig-Signature", hmacSha256Hex(installId, body))
         }
         return try {
-            connection.outputStream.use { it.write(json.toString().toByteArray(Charsets.UTF_8)) }
+            connection.outputStream.use { it.write(body) }
             val body = (if (connection.responseCode in 200..299) connection.inputStream else connection.errorStream)
                 ?.bufferedReader()
                 ?.use { it.readText() }
@@ -630,6 +675,27 @@ class ModernActivity : ComponentActivity() {
             connection.disconnect()
         }
     }
+
+    private fun appSignatureHash(): String = runCatching {
+        val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            packageManager.getPackageInfo(packageName, PackageManager.GET_SIGNING_CERTIFICATES)
+                .signingInfo
+                ?.apkContentsSigners
+        } else {
+            @Suppress("DEPRECATION")
+            packageManager.getPackageInfo(packageName, PackageManager.GET_SIGNATURES).signatures
+        }
+        signatures?.firstOrNull()?.toByteArray()?.let { sha256Hex(it) }.orEmpty()
+    }.getOrDefault("")
+
+    private fun hmacSha256Hex(key: String, data: ByteArray): String {
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(key.toByteArray(Charsets.UTF_8), "HmacSHA256"))
+        return mac.doFinal(data).toHex()
+    }
+
+    private fun sha256Hex(data: ByteArray): String =
+        MessageDigest.getInstance("SHA-256").digest(data).toHex()
 
     private fun cpuSummary(): String {
         val model = if (Build.VERSION.SDK_INT >= 31) {
@@ -711,7 +777,7 @@ private data class RankUi(
     val me: RankUiRow? = null,
 )
 
-private data class RankUiRow(val rank: Int, val name: String, val rate: String)
+private data class RankUiRow(val rank: Int, val name: String, val rate: String, val detail: String = "")
 
 private val Ink = Color(0xFF172033)
 private val Muted = Color(0xFF6E7890)
@@ -1373,6 +1439,7 @@ private fun ColumnScope.RankPage(
     rankMode: String,
     onRankMode: (String) -> Unit,
 ) {
+    var selected by remember { mutableStateOf<RankUiRow?>(null) }
     Text(stringResource(R.string.leaderboard), color = RigBlue, fontSize = 13.sp, fontWeight = FontWeight.Medium)
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         listOf(
@@ -1389,13 +1456,35 @@ private fun ColumnScope.RankPage(
             leaderboard,
             Modifier.fillMaxSize(),
             bottomContentPadding = if (leaderboard.me == null) 0.dp else 82.dp,
+            onRowClick = { selected = it },
         )
         leaderboard.me?.let {
             MyRankCard(
                 it,
                 Modifier.align(Alignment.BottomCenter),
+                onClick = { selected = it },
             )
         }
+    }
+    selected?.let { row ->
+        AlertDialog(
+            onDismissRequest = { selected = null },
+            title = { Text(row.name, color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Medium) },
+            text = {
+                Text(
+                    row.detail,
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    color = MaterialTheme.colorScheme.secondary,
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp,
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { selected = null }) {
+                    Text(stringResource(R.string.close))
+                }
+            },
+        )
     }
 }
 
@@ -1420,7 +1509,12 @@ private fun RowScope.RankModeButton(text: String, selected: Boolean, onClick: ()
 }
 
 @Composable
-private fun RankBox(rank: RankUi, modifier: Modifier = Modifier, bottomContentPadding: Dp = 0.dp) {
+private fun RankBox(
+    rank: RankUi,
+    modifier: Modifier = Modifier,
+    bottomContentPadding: Dp = 0.dp,
+    onRowClick: (RankUiRow) -> Unit = {},
+) {
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = CardFill),
@@ -1437,7 +1531,7 @@ private fun RankBox(rank: RankUi, modifier: Modifier = Modifier, bottomContentPa
                 Text(rank.message, color = MaterialTheme.colorScheme.secondary, fontSize = 14.sp, lineHeight = 20.sp)
             }
             rank.rows.forEachIndexed { index, row ->
-                RankLine(row)
+                RankLine(row, onClick = { onRowClick(row) })
                 if (index != rank.rows.lastIndex) {
                     Box(
                         Modifier
@@ -1459,9 +1553,9 @@ private fun RankBox(rank: RankUi, modifier: Modifier = Modifier, bottomContentPa
 }
 
 @Composable
-private fun RankLine(row: RankUiRow) {
+private fun RankLine(row: RankUiRow, onClick: () -> Unit = {}) {
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -1489,10 +1583,12 @@ private fun rankPrefix(rank: Int): String = when (rank) {
     else -> "#$rank"
 }
 
+private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it.toInt() and 0xff) }
+
 @Composable
-private fun MyRankCard(row: RankUiRow, modifier: Modifier = Modifier) {
+private fun MyRankCard(row: RankUiRow, modifier: Modifier = Modifier, onClick: () -> Unit = {}) {
     Card(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth().clickable(onClick = onClick),
         colors = CardDefaults.cardColors(containerColor = Color.White),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         shape = RoundedCornerShape(20.dp),

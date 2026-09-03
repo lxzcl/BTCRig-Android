@@ -29,6 +29,9 @@ double btcrig_core_benchmark_cpu(int seconds, int threads);
 double btcrig_core_benchmark_cpu_backend(const char *backend, int seconds, int threads);
 double btcrig_core_benchmark_opencl(const char *config_path, int seconds);
 double btcrig_core_benchmark_cpu_gpu(const char *config_path, int seconds, int threads);
+void btcrig_core_benchmark_cpu_challenge(const char *seed, int seconds, int threads, double proof_difficulty, char *out, size_t out_size);
+void btcrig_core_benchmark_opencl_challenge(const char *config_path, const char *seed, int seconds, double proof_difficulty, char *out, size_t out_size);
+void btcrig_core_benchmark_cpu_gpu_challenge(const char *config_path, const char *seed, int seconds, int threads, double proof_difficulty, char *out, size_t out_size);
 
 #ifdef __cplusplus
 }

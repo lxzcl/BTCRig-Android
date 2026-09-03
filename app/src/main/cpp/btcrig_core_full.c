@@ -8,6 +8,7 @@
 #include <jansson.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <openssl/sha.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -713,6 +714,62 @@ static void prepare_benchmark_job(miner_job_t *job) {
     miner_target_from_difficulty(BENCHMARK_DIFFICULTY, job->target);
 }
 
+static void bytes_to_hex(const uint8_t *bytes, size_t len, char *out, size_t out_size) {
+    static const char digits[] = "0123456789abcdef";
+    if (out_size == 0) {
+        return;
+    }
+    size_t need = len * 2U + 1U;
+    if (out_size < need) {
+        out[0] = '\0';
+        return;
+    }
+    for (size_t i = 0; i < len; ++i) {
+        out[i * 2U] = digits[bytes[i] >> 4];
+        out[i * 2U + 1U] = digits[bytes[i] & 0x0fU];
+    }
+    out[len * 2U] = '\0';
+}
+
+static void store_le32(uint8_t *out, uint32_t value) {
+    out[0] = (uint8_t)value;
+    out[1] = (uint8_t)(value >> 8);
+    out[2] = (uint8_t)(value >> 16);
+    out[3] = (uint8_t)(value >> 24);
+}
+
+static void challenge_part(const char *tag, const char *seed, uint8_t out[32]) {
+    SHA256_CTX ctx;
+    SHA256_Init(&ctx);
+    SHA256_Update(&ctx, "btcrig-challenge-v1\n", strlen("btcrig-challenge-v1\n"));
+    SHA256_Update(&ctx, tag, strlen(tag));
+    SHA256_Update(&ctx, "\n", 1);
+    SHA256_Update(&ctx, seed != NULL ? seed : "", strlen(seed != NULL ? seed : ""));
+    SHA256_Final(out, &ctx);
+}
+
+static void prepare_benchmark_challenge_job(miner_job_t *job, const char *seed, double proof_difficulty) {
+    uint8_t prev[32];
+    uint8_t merkle[32];
+    uint8_t ntime[32];
+    memset(job, 0, sizeof(*job));
+    copy_text(job->job_id, sizeof(job->job_id), "challenge");
+    copy_text(job->extranonce2, sizeof(job->extranonce2), "00000000");
+    challenge_part("prev", seed, prev);
+    challenge_part("merkle", seed, merkle);
+    challenge_part("ntime", seed, ntime);
+    bytes_to_hex(ntime, 4, job->ntime, sizeof(job->ntime));
+    store_le32(&job->header[0], 0x20000000U);
+    memcpy(&job->header[4], prev, 32);
+    memcpy(&job->header[36], merkle, 32);
+    memcpy(&job->header[68], ntime, 4);
+    job->header[72] = 0xff;
+    job->header[73] = 0xff;
+    job->header[74] = 0x00;
+    job->header[75] = 0x1d;
+    miner_target_from_difficulty(proof_difficulty, job->target);
+}
+
 static void sleep_seconds(int seconds) {
     struct timespec ts;
     ts.tv_sec = seconds;
@@ -743,11 +800,88 @@ static double run_benchmark_miner(miner_t *miner, int seconds, double failure_va
     return hashes >= base_hashes ? (double)(hashes - base_hashes) / (double)seconds : 0.0;
 }
 
+static void write_challenge_result(char *out,
+                                   size_t out_size,
+                                   double hashrate,
+                                   int found,
+                                   uint32_t nonce,
+                                   const uint8_t hash[32],
+                                   double difficulty) {
+    char hash_hex[65];
+    hash_hex[0] = '\0';
+    if (found && hash != NULL) {
+        bytes_to_hex(hash, 32, hash_hex, sizeof(hash_hex));
+    }
+    snprintf(out, out_size,
+             "{\"hashrate\":%.3f,\"proof_found\":%s,\"proof_nonce\":%u,\"proof_hash\":\"%s\",\"proof_difficulty\":%.8f}",
+             hashrate,
+             found ? "true" : "false",
+             nonce,
+             hash_hex,
+             difficulty);
+}
+
+static void run_benchmark_challenge_miner(miner_t *miner,
+                                          const char *seed,
+                                          int seconds,
+                                          double proof_difficulty,
+                                          double failure_value,
+                                          char *out,
+                                          size_t out_size) {
+    if (seconds < 1) {
+        seconds = 1;
+    }
+    if (proof_difficulty <= 0.0) {
+        proof_difficulty = 0.0005;
+    }
+    if (miner == NULL || miner_start(miner) != 0) {
+        miner_destroy(miner);
+        write_challenge_result(out, out_size, failure_value, 0, 0, NULL, proof_difficulty);
+        return;
+    }
+
+    miner_job_t job;
+    prepare_benchmark_challenge_job(&job, seed, proof_difficulty);
+    miner_set_job(miner, &job);
+
+    sleep_seconds(BENCHMARK_WARMUP_SECONDS);
+    uint64_t base_hashes = miner_hashes(miner);
+    sleep_seconds(seconds);
+    uint64_t hashes = miner_hashes(miner);
+    miner_stop(miner);
+
+    miner_share_t share;
+    miner_share_t best;
+    int found = 0;
+    memset(&best, 0, sizeof(best));
+    while (miner_pop_share(miner, &share)) {
+        if (!found || share.difficulty > best.difficulty) {
+            best = share;
+            found = 1;
+        }
+    }
+    miner_destroy(miner);
+
+    double hashrate = hashes >= base_hashes ? (double)(hashes - base_hashes) / (double)seconds : 0.0;
+    write_challenge_result(out, out_size, hashrate, found, best.nonce, best.hash, proof_difficulty);
+}
+
 double btcrig_core_benchmark_cpu(int seconds, int threads) {
     if (threads < 1) {
         threads = 1;
     }
     return run_benchmark_miner(miner_create(threads), seconds, 0.0);
+}
+
+void btcrig_core_benchmark_cpu_challenge(const char *seed, int seconds, int threads, double proof_difficulty, char *out, size_t out_size) {
+    if (threads < 1) {
+        threads = 1;
+    }
+    if (btcrig_core_is_running()) {
+        write_challenge_result(out, out_size, -1.0, 0, 0, NULL, proof_difficulty);
+        return;
+    }
+    run_benchmark_challenge_miner(miner_create(threads), seed, seconds, proof_difficulty, 0.0, out, out_size);
 }
 
 double btcrig_core_benchmark_cpu_backend(const char *backend, int seconds, int threads) {
@@ -784,6 +918,23 @@ double btcrig_core_benchmark_opencl(const char *config_path, int seconds) {
 #endif
 }
 
+void btcrig_core_benchmark_opencl_challenge(const char *config_path, const char *seed, int seconds, double proof_difficulty, char *out, size_t out_size) {
+#if defined(BTC_MINER_OPENCL)
+    if (btcrig_core_is_running()) {
+        write_challenge_result(out, out_size, -1.0, 0, 0, NULL, proof_difficulty);
+        return;
+    }
+    core_config_t config = read_config(config_path);
+    config.opencl.enabled = 1;
+    run_benchmark_challenge_miner(miner_create_with_backend_options(0, &config.opencl, NULL), seed, seconds, proof_difficulty, -1.0, out, out_size);
+#else
+    (void)config_path;
+    (void)seed;
+    (void)seconds;
+    write_challenge_result(out, out_size, -1.0, 0, 0, NULL, proof_difficulty);
+#endif
+}
+
 double btcrig_core_benchmark_cpu_gpu(const char *config_path, int seconds, int threads) {
 #if defined(BTC_MINER_OPENCL)
     if (btcrig_core_is_running()) {
@@ -801,5 +952,26 @@ double btcrig_core_benchmark_cpu_gpu(const char *config_path, int seconds, int t
     (void)seconds;
     (void)threads;
     return -1.0;
+#endif
+}
+
+void btcrig_core_benchmark_cpu_gpu_challenge(const char *config_path, const char *seed, int seconds, int threads, double proof_difficulty, char *out, size_t out_size) {
+#if defined(BTC_MINER_OPENCL)
+    if (btcrig_core_is_running()) {
+        write_challenge_result(out, out_size, -1.0, 0, 0, NULL, proof_difficulty);
+        return;
+    }
+    if (threads < 1) {
+        threads = available_processors();
+    }
+    core_config_t config = read_config(config_path);
+    config.opencl.enabled = 1;
+    run_benchmark_challenge_miner(miner_create_with_backend_options(threads, &config.opencl, NULL), seed, seconds, proof_difficulty, -1.0, out, out_size);
+#else
+    (void)config_path;
+    (void)seed;
+    (void)seconds;
+    (void)threads;
+    write_challenge_result(out, out_size, -1.0, 0, 0, NULL, proof_difficulty);
 #endif
 }

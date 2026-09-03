@@ -33,10 +33,20 @@ internal data class ReleaseInfo(val version: String, val url: String)
 
 internal data class OpenclInfo(val name: String, val version: String)
 
+internal data class BenchmarkProof(
+    val hps: Double = -1.0,
+    val nonce: Long = 0,
+    val hash: String = "",
+    val found: Boolean = false,
+)
+
 internal data class BenchmarkResult(
     val cpuHps: Double,
     val gpuHps: Double,
     val cpuGpuHps: Double,
+    val cpuProof: BenchmarkProof = BenchmarkProof(),
+    val gpuProof: BenchmarkProof = BenchmarkProof(),
+    val cpuGpuProof: BenchmarkProof = BenchmarkProof(),
 )
 
 internal data class SubmitResult(val accepted: Boolean, val text: String)
@@ -46,6 +56,7 @@ internal data class BenchmarkChallenge(
     val seed: String,
     val token: String,
     val seconds: Int,
+    val proofDifficulty: Double,
 )
 
 internal data class RankUi(

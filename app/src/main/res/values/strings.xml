@@ -47,6 +47,7 @@
     <string name="benchmark_challenge_ready">Challenge: ready</string>
     <string name="benchmark_challenge_started">Challenge: started</string>
     <string name="benchmark_challenge_submitting">Submitting verified result...</string>
+    <string name="benchmark_no_proof">%1$s / no proof</string>
     <string name="benchmark_uploaded_score">Uploaded score: %1$s</string>
     <string name="leaderboard">Leaderboard</string>
     <string name="leaderboard_loading">Loading...</string>

@@ -149,6 +149,23 @@ Java_com_btcrig_android_BtcrigNative_benchmarkCpu(JNIEnv *env, jclass ignored, j
     return btcrig_core_benchmark_cpu(seconds, threads);
 }
 
+JNIEXPORT jstring JNICALL
+Java_com_btcrig_android_BtcrigNative_benchmarkCpuChallenge(JNIEnv *env,
+                                                           jclass ignored,
+                                                           jstring seed,
+                                                           jint seconds,
+                                                           jint threads,
+                                                           jdouble proof_difficulty) {
+    (void)ignored;
+    char text[256];
+    const char *seed_text = seed == NULL ? NULL : (*env)->GetStringUTFChars(env, seed, NULL);
+    btcrig_core_benchmark_cpu_challenge(seed_text, seconds, threads, proof_difficulty, text, sizeof(text));
+    if (seed_text != NULL) {
+        (*env)->ReleaseStringUTFChars(env, seed, seed_text);
+    }
+    return (*env)->NewStringUTF(env, text);
+}
+
 JNIEXPORT jdouble JNICALL
 Java_com_btcrig_android_BtcrigNative_benchmarkCpuBackend(JNIEnv *env,
                                                          jclass ignored,
@@ -178,6 +195,27 @@ Java_com_btcrig_android_BtcrigNative_benchmarkOpencl(JNIEnv *env,
     return hps;
 }
 
+JNIEXPORT jstring JNICALL
+Java_com_btcrig_android_BtcrigNative_benchmarkOpenclChallenge(JNIEnv *env,
+                                                              jclass ignored,
+                                                              jstring config_path,
+                                                              jstring seed,
+                                                              jint seconds,
+                                                              jdouble proof_difficulty) {
+    (void)ignored;
+    char text[256];
+    const char *path = config_path == NULL ? NULL : (*env)->GetStringUTFChars(env, config_path, NULL);
+    const char *seed_text = seed == NULL ? NULL : (*env)->GetStringUTFChars(env, seed, NULL);
+    btcrig_core_benchmark_opencl_challenge(path, seed_text, seconds, proof_difficulty, text, sizeof(text));
+    if (seed_text != NULL) {
+        (*env)->ReleaseStringUTFChars(env, seed, seed_text);
+    }
+    if (path != NULL) {
+        (*env)->ReleaseStringUTFChars(env, config_path, path);
+    }
+    return (*env)->NewStringUTF(env, text);
+}
+
 JNIEXPORT jdouble JNICALL
 Java_com_btcrig_android_BtcrigNative_benchmarkCpuGpu(JNIEnv *env,
                                                      jclass ignored,
@@ -191,4 +229,26 @@ Java_com_btcrig_android_BtcrigNative_benchmarkCpuGpu(JNIEnv *env,
         (*env)->ReleaseStringUTFChars(env, config_path, path);
     }
     return hps;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_btcrig_android_BtcrigNative_benchmarkCpuGpuChallenge(JNIEnv *env,
+                                                              jclass ignored,
+                                                              jstring config_path,
+                                                              jstring seed,
+                                                              jint seconds,
+                                                              jint threads,
+                                                              jdouble proof_difficulty) {
+    (void)ignored;
+    char text[256];
+    const char *path = config_path == NULL ? NULL : (*env)->GetStringUTFChars(env, config_path, NULL);
+    const char *seed_text = seed == NULL ? NULL : (*env)->GetStringUTFChars(env, seed, NULL);
+    btcrig_core_benchmark_cpu_gpu_challenge(path, seed_text, seconds, threads, proof_difficulty, text, sizeof(text));
+    if (seed_text != NULL) {
+        (*env)->ReleaseStringUTFChars(env, seed, seed_text);
+    }
+    if (path != NULL) {
+        (*env)->ReleaseStringUTFChars(env, config_path, path);
+    }
+    return (*env)->NewStringUTF(env, text);
 }

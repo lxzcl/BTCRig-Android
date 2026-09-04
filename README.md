@@ -4,7 +4,7 @@ Android BTCRig app with native CPU/OpenCL mining support.
 
 ## Status
 
-- Version: `0.1.5`
+- Version: `0.2.0`
 - Android: `minSdk 21`, `targetSdk 36`, `compileSdk 36`
 - ABI: `arm64-v8a`, `armeabi-v7a`
 - UI: Jetpack Compose / Material3

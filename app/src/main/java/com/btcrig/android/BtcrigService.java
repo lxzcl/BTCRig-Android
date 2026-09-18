@@ -27,6 +27,7 @@ public final class BtcrigService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
             setDesiredRunning(false);
+            setServiceError("");
             stopNotificationLoop();
             stopCoreAsync(true);
             return START_NOT_STICKY;
@@ -37,15 +38,19 @@ public final class BtcrigService extends Service {
 
         createNotificationChannel();
         startForeground(NOTIFICATION_ID, buildNotification());
+        setServiceError("");
         File config;
         try {
             config = BtcrigConfig.ensure(this);
         } catch (IOException e) {
+            setServiceError("config read failed: " + e.getMessage());
             setDesiredRunning(false);
             stopSelf();
             return START_NOT_STICKY;
         }
         if (!BtcrigNative.start(config.getAbsolutePath())) {
+            String error = BtcrigNative.lastError();
+            setServiceError(error == null || error.isEmpty() ? "native core failed" : error);
             setDesiredRunning(false);
             releaseWakeLock();
             stopSelf();
@@ -128,6 +133,13 @@ public final class BtcrigService extends Service {
         getSharedPreferences("service", MODE_PRIVATE)
                 .edit()
                 .putBoolean("desired_running", running)
+                .apply();
+    }
+
+    private void setServiceError(String error) {
+        getSharedPreferences("service", MODE_PRIVATE)
+                .edit()
+                .putString("last_error", error == null ? "" : error)
                 .apply();
     }
 

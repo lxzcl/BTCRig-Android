@@ -23,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.delay
 import java.io.File
+import java.net.URI
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
@@ -48,10 +49,13 @@ class ModernActivity : ComponentActivity() {
             var showJson by remember { mutableStateOf(false) }
             var showLog by remember { mutableStateOf(false) }
             var logText by remember { mutableStateOf("") }
-            var basic by remember { mutableStateOf(readBasic()) }
+            val initialBasic = remember { readBasic() }
+            var basic by remember { mutableStateOf(initialBasic) }
+            var settingsValidation by remember { mutableStateOf(validateBasicMessage(initialBasic)) }
             var benchmark by remember { mutableStateOf(loadBenchmarkDisplayText()) }
             var benchmarking by remember { mutableStateOf(false) }
             var uploadingBenchmark by remember { mutableStateOf(false) }
+            var stopping by remember { mutableStateOf(false) }
             var rankMode by remember { mutableStateOf("all") }
             var leaderboard by remember { mutableStateOf(defaultLeaderboard()) }
             var update by remember { mutableStateOf(UpdateState()) }
@@ -67,6 +71,7 @@ class ModernActivity : ComponentActivity() {
                 refreshUi = {
                     serviceState = ""
                     basic = readBasic()
+                    settingsValidation = validateBasicMessage(basic)
                     ui = readUi()
                     if (!benchmarking && !uploadingBenchmark) {
                         benchmark = loadBenchmarkDisplayText()
@@ -77,6 +82,10 @@ class ModernActivity : ComponentActivity() {
             }
             fun saveBasic(next: BtcrigConfig.Basic) {
                 basic = next
+                settingsValidation = validateBasicMessage(next)
+                if (settingsValidation.isNotBlank()) {
+                    return
+                }
                 runCatching { BtcrigConfig.writeBasic(this, next) }
                     .onSuccess { ui = readUi() }
                     .onFailure { error -> toast(getString(R.string.save_failed, error.message)) }
@@ -92,6 +101,20 @@ class ModernActivity : ComponentActivity() {
                 while (ui.running) {
                     delay(2000)
                     ui = readUi()
+                }
+            }
+
+            LaunchedEffect(stopping) {
+                while (stopping) {
+                    delay(500)
+                    val next = readUi()
+                    if (!next.running) {
+                        stopping = false
+                        serviceState = "stopped"
+                        ui = next.copy(service = "stopped", stopping = false)
+                    } else {
+                        ui = next.copy(service = "stopping", stopping = true)
+                    }
                 }
             }
 
@@ -114,6 +137,7 @@ class ModernActivity : ComponentActivity() {
                     ui = ui,
                     update = update,
                     page = page,
+                    settingsValidation = settingsValidation,
                     benchmark = benchmark,
                     rankMode = rankMode,
                     leaderboard = leaderboard,
@@ -128,20 +152,22 @@ class ModernActivity : ComponentActivity() {
                             serviceState = "running"
                             ui = readUi().copy(running = true, service = "running")
                             refreshSoon()
+                            showStartFailureIfAny()
                         } else {
                             page = 1
                             ui = readUi()
                         }
                     },
                     onStop = {
+                        if (stopping) return@BtcrigScreen
+                        stopping = true
                         setServiceExpectedRunning(false)
+                        serviceState = "stopping"
                         stopBtcrigService()
-                        serviceState = "stopped"
-                        ui = readUi().copy(running = false, service = "stopped")
-                        refreshSoon()
+                        ui = readUi().copy(service = "stopping", stopping = true)
                     },
                     onBenchmark = {
-                        if (ui.running) {
+                        if (ui.running || ui.stopping) {
                             toast(getString(R.string.stop_mining_before_benchmark))
                             return@BtcrigScreen
                         }
@@ -180,7 +206,7 @@ class ModernActivity : ComponentActivity() {
                         }.start()
                     },
                     onUploadBenchmark = {
-                        if (ui.running) {
+                        if (ui.running || ui.stopping) {
                             toast(getString(R.string.stop_mining_before_benchmark))
                             return@BtcrigScreen
                         }
@@ -219,6 +245,7 @@ class ModernActivity : ComponentActivity() {
                                 .onSuccess {
                                     showJson = false
                                     basic = readBasic()
+                                    settingsValidation = validateBasicMessage(basic)
                                     ui = readUi()
                                     toast(getString(R.string.config_saved))
                                 }
@@ -253,13 +280,13 @@ class ModernActivity : ComponentActivity() {
     }
 
     private fun startBtcrigService(): Boolean {
-        val basic = runCatching { BtcrigConfig.readBasic(this) }.getOrNull() ?: return false
-        if (basic.poolUrl.trim().isEmpty() || basic.user.trim().isEmpty()) {
-            toast(getString(R.string.configure_pool_user_first))
+        val basic = runCatching { BtcrigConfig.readBasic(this) }.getOrElse {
+            toast(getString(R.string.config_read_failed, it.message ?: it.javaClass.simpleName))
             return false
         }
-        if (basic.cpuThreads <= 0 && !basic.openclEnabled) {
-            toast(getString(R.string.enable_cpu_or_opencl_first))
+        val validation = validateBasicMessage(basic)
+        if (validation.isNotBlank()) {
+            toast(validation)
             return false
         }
         runCatching { BtcrigConfig.writeBasic(this, basic) }
@@ -270,6 +297,19 @@ class ModernActivity : ComponentActivity() {
         val intent = Intent(this, BtcrigService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent) else startService(intent)
         return true
+    }
+
+    private fun showStartFailureIfAny() {
+        Thread {
+            Thread.sleep(1800)
+            val next = readUi()
+            if (!next.running && next.error.isNotBlank()) {
+                runOnUiThread {
+                    refreshUi?.invoke()
+                    toast(getString(R.string.start_failed_with_reason, next.error.lineSequence().first()))
+                }
+            }
+        }.start()
     }
 
     private fun stopBtcrigService() {
@@ -290,6 +330,7 @@ class ModernActivity : ComponentActivity() {
         val configPath = runCatching { BtcrigConfig.ensure(this).absolutePath }.getOrDefault(getString(R.string.unavailable_wrapped))
         val logFile = File(filesDir, "btcrig.log")
         val logPath = logFile.absolutePath
+        val serviceError = getSharedPreferences("service", MODE_PRIVATE).getString("last_error", "").orEmpty()
         val configuredPool = runCatching { BtcrigConfig.readBasic(this).poolUrl.ifBlank { getString(R.string.not_configured) } }
             .getOrDefault(getString(R.string.unavailable))
         val configSummary = runCatching {
@@ -300,9 +341,12 @@ class ModernActivity : ComponentActivity() {
         }.getOrDefault(getString(R.string.config_summary_unavailable))
         val opencl = runCatching { BtcrigNative.openclStatus(configPath) }
             .getOrDefault("Config: unavailable\nRuntime: not probed\nMode: CPU only")
+        val basic = runCatching { BtcrigConfig.readBasic(this) }.getOrElse { BtcrigConfig.Basic() }
         val nativeError = cleanLog(BtcrigNative.lastError()).trim()
         val logError = recentLogError(logFile)
-        val error = readableError(if (nativeError.startsWith("core returned")) logError.ifBlank { nativeError } else nativeError.ifBlank { logError })
+        val error = readableError(serviceError.ifBlank {
+            if (nativeError.startsWith("core returned")) logError.ifBlank { nativeError } else nativeError.ifBlank { logError }
+        })
             .ifBlank { if (!running && expectedRunning) getString(R.string.service_not_running_hint) else "" }
 
         return UiState(
@@ -311,6 +355,7 @@ class ModernActivity : ComponentActivity() {
             selfTest = BtcrigNative.selfTest(),
             running = running,
             service = serviceState.ifEmpty { if (running) "running" else if (expectedRunning) "missing" else "stopped" },
+            stopping = serviceState == "stopping",
             hashrate = if (running) formatHashrate(BtcrigNative.hashrate()) else "-- H/s",
             workers = if (running) getString(R.string.workers_value, BtcrigNative.workerCount()) else getString(R.string.workers_empty),
             total = if (running) getString(R.string.total_value, BtcrigNative.totalHashes()) else getString(R.string.total_empty),
@@ -332,6 +377,7 @@ class ModernActivity : ComponentActivity() {
             },
             error = error,
             opencl = opencl,
+            openclDiagnosis = openclDiagnosis(opencl, basic.openclEnabled),
             cpuSummary = cpuSummary(),
             gpuSummary = gpuSummary(opencl),
             configSummary = configSummary,
@@ -357,13 +403,64 @@ class ModernActivity : ComponentActivity() {
         if (text.isEmpty()) return ""
         val lower = text.lowercase(Locale.US)
         val hint = when {
-            "sslhandshakeexception" in lower || "certificate" in lower -> R.string.error_hint_tls
-            "opencl" in lower && ("failed" in lower || "unavailable" in lower || "not found" in lower) -> R.string.error_hint_opencl
-            "connect" in lower || "[net]" in lower || "closed connection" in lower -> R.string.error_hint_pool
-            "json" in lower || "bad config" in lower || "invalid url" in lower -> R.string.error_hint_config
+            "tls" in lower || "ssl" in lower || "sslhandshakeexception" in lower || "certificate" in lower -> R.string.error_hint_tls
+            "authorize" in lower && ("failed" in lower || "false" in lower || "rejected" in lower) -> R.string.error_hint_auth
+            "opencl" in lower && ("failed" in lower || "unavailable" in lower || "not found" in lower || "no usable" in lower) -> R.string.error_hint_opencl
+            "connect" in lower || "[net]" in lower || "closed connection" in lower || "timed out" in lower ||
+                "unknownhost" in lower || "refused" in lower || "unreachable" in lower -> R.string.error_hint_pool
+            "json" in lower || "bad config" in lower || "config read" in lower ||
+                "invalid url" in lower || "pool url must" in lower -> R.string.error_hint_config
             else -> 0
         }
         return if (hint == 0) text else "${getString(hint)}\n$text"
+    }
+
+    private fun validateBasicMessage(basic: BtcrigConfig.Basic): String {
+        val url = basic.poolUrl.trim()
+        if (url.isEmpty()) return getString(R.string.validation_pool_required)
+        if ('\\' in url) return getString(R.string.validation_pool_bad_chars)
+
+        val uri = runCatching { URI(url) }.getOrNull()
+            ?: return getString(R.string.validation_pool_url)
+        val scheme = uri.scheme.orEmpty().lowercase(Locale.US)
+        val allowedSchemes = setOf(
+            "stratum+tcp",
+            "stratum+tls",
+            "stratum+ssl",
+            "stratum+tls-insecure",
+            "stratum+ssl-insecure",
+            "tcp",
+            "tls",
+            "ssl",
+            "tls-insecure",
+            "ssl-insecure",
+        )
+        if (scheme !in allowedSchemes) return getString(R.string.validation_pool_scheme)
+        if (uri.host.isNullOrBlank()) return getString(R.string.validation_pool_host)
+        if (uri.port !in 1..65535) return getString(R.string.validation_pool_port)
+        if (basic.user.trim().isEmpty()) return getString(R.string.validation_user_required)
+        val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+        if (basic.cpuThreads !in 0..cores) return getString(R.string.validation_threads_range, cores)
+        if (!basic.difficulty.isFinite() || basic.difficulty < 0.0) return getString(R.string.validation_difficulty)
+        if (basic.cpuThreads == 0 && !basic.openclEnabled) return getString(R.string.enable_cpu_or_opencl_first)
+        return ""
+    }
+
+    private fun openclDiagnosis(opencl: String, enabled: Boolean): String {
+        val lower = opencl.lowercase(Locale.US)
+        val reason = opencl.lineSequence()
+            .firstOrNull { it.startsWith("Reason:", ignoreCase = true) }
+            ?.substringAfter(':')
+            ?.trim()
+            .orEmpty()
+        return when {
+            !enabled || "config: disabled" in lower -> getString(R.string.opencl_diag_disabled)
+            "runtime: not built" in lower -> getString(R.string.opencl_diag_not_built)
+            "runtime: unavailable" in lower -> getString(R.string.opencl_diag_unavailable, reason.ifBlank { getString(R.string.unavailable) })
+            "devices:" in lower && "#0 " in opencl -> getString(R.string.opencl_diag_available)
+            "devices: 0" in lower -> getString(R.string.opencl_diag_no_device)
+            else -> getString(R.string.opencl_diag_unknown)
+        }
     }
 
     private fun copyToClipboard(label: String, text: String) {

@@ -51,7 +51,8 @@ private fun isRecoveryLogLine(line: String): Boolean {
     val lower = line.lowercase(Locale.US)
     return "[stats] rate=" in lower ||
         ("[submit-rsp]" in lower && "accepted" in lower) ||
-        "[authorize] ok" in lower
+        "[authorize] ok" in lower ||
+        "[notify]" in lower
 }
 
 private fun isImportantLogLine(line: String): Boolean {
@@ -60,6 +61,10 @@ private fun isImportantLogLine(line: String): Boolean {
         "error" in lower ||
         "invalid" in lower ||
         "exception" in lower ||
+        "timed out" in lower ||
+        "refused" in lower ||
+        "unknownhost" in lower ||
+        "unreachable" in lower ||
         "closed connection" in lower ||
         ("opencl" in lower && ("unavailable" in lower || "not found" in lower))
 }
@@ -124,6 +129,7 @@ internal fun previewUi() = UiState(
     selfTest = true,
     running = true,
     service = "running",
+    stopping = false,
     hashrate = "141.30 MH/s",
     workers = "Workers: 8",
     total = "Total: 123456789",
@@ -132,6 +138,7 @@ internal fun previewUi() = UiState(
     shares = "Shares: 3 submit / 3 ok / 0 reject",
     error = "",
     opencl = "Config: enabled\nRuntime: available\n#0 / Qualcomm / Adreno(TM) 750 / OpenCL 3.0",
+    openclDiagnosis = "OpenCL runtime and GPU device are available.",
     cpuSummary = "QTI SM8650 · 8 cores · arm64-v8a",
     gpuSummary = "OpenCL 3.0 Adreno(TM) 750",
     configSummary = "CPU: 8 threads / OpenCL: enabled",

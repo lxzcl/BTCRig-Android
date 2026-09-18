@@ -130,6 +130,7 @@ private fun PreviewScreen(page: Int) {
             ui = previewUi(),
             update = UpdateState(latestVersion = "0.1.3", available = true),
             page = page,
+            settingsValidation = "",
             benchmark = "Benchmark\nCPU full cores: 8\n\nCPU: --\nGPU: --\nCPU + GPU: --",
             rankMode = "all",
             leaderboard = RankUi(
@@ -160,6 +161,7 @@ internal fun BtcrigScreen(
     ui: UiState,
     update: UpdateState,
     page: Int,
+    settingsValidation: String,
     benchmark: String,
     rankMode: String,
     leaderboard: RankUi,
@@ -202,7 +204,7 @@ internal fun BtcrigScreen(
                                 verticalArrangement = Arrangement.spacedBy(16.dp),
                             ) {
                                 PageHeader()
-                                SettingsPage(ui, basic, onBasicChange, onBatteryOptimization, onJson)
+                                SettingsPage(ui, basic, settingsValidation, onBasicChange, onBatteryOptimization, onJson)
                             }
                         }
                         2 -> {
@@ -326,10 +328,12 @@ private fun HomePage(
                 StatusPill(
                     running = ui.running,
                     text = when {
+                        ui.stopping -> stringResource(R.string.status_stopping)
                         ui.running -> stringResource(R.string.status_running)
                         ui.service == "missing" -> stringResource(R.string.status_service_missing)
                         else -> stringResource(R.string.status_stopped)
                     },
+                    enabled = !ui.stopping,
                     onClick = { if (ui.running) onStop() else onStart() },
                 )
             }
@@ -508,7 +512,7 @@ private fun HeroGlow(running: Boolean) {
 }
 
 @Composable
-private fun StatusPill(running: Boolean, text: String, onClick: () -> Unit) {
+private fun StatusPill(running: Boolean, text: String, enabled: Boolean, onClick: () -> Unit) {
     val transition = rememberInfiniteTransition(label = "status")
     val alpha by transition.animateFloat(
         initialValue = 0.35f,
@@ -527,7 +531,7 @@ private fun StatusPill(running: Boolean, text: String, onClick: () -> Unit) {
         modifier = Modifier
             .clip(RoundedCornerShape(999.dp))
             .background(if (running) Color(0xFFDFF8E9) else SoftBlue)
-            .clickable(onClick = onClick)
+            .clickable(enabled = enabled, onClick = onClick)
             .padding(horizontal = 24.dp, vertical = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -572,11 +576,12 @@ private fun SpecRow(name: String, value: String) {
 private fun SettingsPage(
     ui: UiState,
     basic: BtcrigConfig.Basic,
+    settingsValidation: String,
     onBasicChange: (BtcrigConfig.Basic) -> Unit,
     onBatteryOptimization: () -> Unit,
     onJson: () -> Unit,
 ) {
-    val enabled = !ui.running
+    val enabled = !ui.running && !ui.stopping
     SettingSection(stringResource(R.string.settings_title), compact = true) {
         SettingField(
             value = basic.poolUrl,
@@ -623,8 +628,31 @@ private fun SettingsPage(
             Line(stringResource(R.string.stop_service_before_save))
         }
     }
+    SettingValidationCard(settingsValidation, ui.openclDiagnosis)
     RigButton(text = stringResource(R.string.ignore_battery_optimizations), onClick = onBatteryOptimization)
     RigButton(text = stringResource(R.string.advanced_json), onClick = onJson, enabled = enabled)
+}
+
+@Composable
+private fun SettingValidationCard(validation: String, openclDiagnosis: String) {
+    SettingSection(stringResource(R.string.settings_check), compact = true) {
+        ValidationLine(
+            text = validation.ifBlank { stringResource(R.string.settings_check_ok) },
+            isError = validation.isNotBlank(),
+        )
+        Line("${stringResource(R.string.opencl_diagnostics)}: $openclDiagnosis")
+    }
+}
+
+@Composable
+private fun ValidationLine(text: String, isError: Boolean) {
+    Text(
+        text,
+        color = if (isError) Color(0xFFB23A48) else RigBlue,
+        fontSize = 14.sp,
+        lineHeight = 18.sp,
+        fontWeight = if (isError) FontWeight.Medium else FontWeight.Normal,
+    )
 }
 
 @Composable
@@ -718,12 +746,12 @@ private fun InfoPage(
         RigButton(
             text = if (benchmarking) stringResource(R.string.benchmarking) else stringResource(R.string.benchmark),
             onClick = onBenchmark,
-            enabled = !benchmarking && !uploadingBenchmark && !ui.running
+            enabled = !benchmarking && !uploadingBenchmark && !ui.running && !ui.stopping
         )
         RigButton(
             text = if (uploadingBenchmark) stringResource(R.string.uploading_score) else stringResource(R.string.upload_score),
             onClick = onUploadBenchmark,
-            enabled = !benchmarking && !uploadingBenchmark && !ui.running
+            enabled = !benchmarking && !uploadingBenchmark && !ui.running && !ui.stopping
         )
     }
     BenchmarkBox(benchmark)
@@ -733,15 +761,29 @@ private fun InfoPage(
         Line("${stringResource(R.string.recent_error)}: ${ui.error.ifBlank { stringResource(R.string.no_recent_errors) }}")
         Line("${stringResource(R.string.backend)}: ${ui.backend}")
         Line("${stringResource(R.string.self_test)}: ${if (ui.selfTest) stringResource(R.string.ok) else stringResource(R.string.failed)}")
-        Line("${stringResource(R.string.opencl_label)}:\n${ui.opencl}")
         Line(stringResource(R.string.config_log_value, ui.configPath, ui.logPath))
     }
+    OpenclDiagnosticCard(ui.openclDiagnosis, ui.opencl)
     DonationCard(
         percent = basic.donationPercent,
-        enabled = !ui.running,
+        enabled = !ui.running && !ui.stopping,
         onChange = { onBasicChange(basic.copyBasic(donationPercent = it)) },
     )
     Spacer(Modifier.height(16.dp))
+}
+
+@Composable
+private fun OpenclDiagnosticCard(diagnosis: String, rawStatus: String) {
+    SettingSection(stringResource(R.string.opencl_diagnostics), compact = true) {
+        Line(diagnosis)
+        Text(
+            rawStatus,
+            color = MaterialTheme.colorScheme.secondary,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 12.sp,
+            lineHeight = 16.sp,
+        )
+    }
 }
 
 @Composable

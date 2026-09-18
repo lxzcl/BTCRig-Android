@@ -93,6 +93,7 @@ final class BtcrigConfig {
             basic.donationPercent = donation.optInt("percent", basic.donationPercent);
         }
         basic.donationPercent = root.optInt("donation_percent", basic.donationPercent);
+        basic.donationPercent = sanitizeDonationPercent(basic.donationPercent);
 
         JSONArray pools = root.optJSONArray("pools");
         JSONObject pool = pools != null && pools.length() > 0 ? pools.optJSONObject(0) : null;

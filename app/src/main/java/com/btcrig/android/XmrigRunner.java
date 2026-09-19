@@ -10,6 +10,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
@@ -75,9 +76,9 @@ final class XmrigRunner {
             process = new ProcessBuilder(command)
                     .directory(context.getFilesDir())
                     .redirectErrorStream(true)
-                    .redirectOutput(new File("/dev/null"))
                     .start();
             Process started = process;
+            discardOutput(started, "XMRig-output");
             new Thread(() -> watch(started), "XMRig-watch").start();
             return true;
         } catch (Exception e) {
@@ -118,8 +119,8 @@ final class XmrigRunner {
             benchmark = new ProcessBuilder(command)
                     .directory(context.getFilesDir())
                     .redirectErrorStream(true)
-                    .redirectOutput(new File("/dev/null"))
                     .start();
+            discardOutput(benchmark, "XMRig-benchmark-output");
             String currentName = "";
             long deadline = System.currentTimeMillis() + 10 * 60_000L;
             while (System.currentTimeMillis() < deadline) {
@@ -354,6 +355,20 @@ final class XmrigRunner {
     }
 
     private static String readLog() { return readFile(logFile, 64 * 1024); }
+
+    private static void discardOutput(Process child, String threadName) {
+        Thread drain = new Thread(() -> {
+            byte[] buffer = new byte[4096];
+            try (InputStream input = child.getInputStream()) {
+                while (input.read(buffer) >= 0) {
+                    // XMRig writes its useful output to --log-file.
+                }
+            } catch (IOException ignored) {
+            }
+        }, threadName);
+        drain.setDaemon(true);
+        drain.start();
+    }
 
     private static String formatRate(double value) {
         if (value >= 1_000_000.0) return String.format(Locale.US, "%.2f MH/s", value / 1_000_000.0);

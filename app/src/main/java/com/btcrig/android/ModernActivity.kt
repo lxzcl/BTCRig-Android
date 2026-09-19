@@ -48,8 +48,8 @@ class ModernActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
         )
         requestNotificationPermission()
-        maybeAutoStartMining()
         runCatching { XmrigRunner.cleanupStaleProcess() }
+        maybeAutoStartMining()
 
         setContent {
             var ui by remember { mutableStateOf(readUi()) }
@@ -314,8 +314,8 @@ class ModernActivity : ComponentActivity() {
 
     private fun maybeAutoStartMining() {
         val basic = runCatching { BtcrigConfig.readBasic(this) }.getOrNull() ?: return
-        if (!basic.autoStart) return
-        if (XmrigRunner.isRunning() || BtcrigNative.isRunning() || serviceExpectedRunning()) return
+        if (!basic.autoStart && !serviceExpectedRunning()) return
+        if (XmrigRunner.isRunning() || BtcrigNative.isRunning()) return
         startBtcrigService()
     }
 
@@ -387,9 +387,14 @@ class ModernActivity : ComponentActivity() {
     private fun readUi(): UiState {
         val basic = runCatching { BtcrigConfig.readBasic(this) }.getOrElse { BtcrigConfig.Basic() }
         val xmrig = basic.engine == "xmrig"
-        val running = if (xmrig) XmrigRunner.isRunning() || (basic.gpuCompanion && BtcrigNative.isRunning()) else BtcrigNative.isRunning()
+        val xmrigRunning = xmrig && XmrigRunner.isRunning()
+        val companionRunning = xmrig && basic.gpuCompanion && BtcrigNative.isRunning()
+        val running = if (xmrig) xmrigRunning || companionRunning else BtcrigNative.isRunning()
         val expectedRunning = serviceExpectedRunning()
         val configPath = runCatching { BtcrigConfig.ensure(this).absolutePath }.getOrDefault(getString(R.string.unavailable_wrapped))
+        val openclConfigPath = if (xmrig && basic.gpuCompanion) {
+            BtcrigConfig.companionConfigFile(this).takeIf { it.isFile }?.absolutePath ?: configPath
+        } else configPath
         val logFile = if (xmrig) XmrigRunner.logFile(this) else File(filesDir, "btcrig.log")
         val logPath = logFile.absolutePath
         val serviceError = getSharedPreferences("service", MODE_PRIVATE).getString("last_error", "").orEmpty()
@@ -402,7 +407,7 @@ class ModernActivity : ComponentActivity() {
                 else getString(R.string.xmrig_config_summary_fixed, basic.xmrigAlgo, basic.xmrigThreads)
             } else getString(R.string.cpu_opencl_summary, cpu, openclValue)
         }.getOrDefault(getString(R.string.config_summary_unavailable))
-        val opencl = runCatching { BtcrigNative.openclStatus(configPath) }
+        val opencl = runCatching { BtcrigNative.openclStatus(openclConfigPath) }
             .getOrDefault("Config: unavailable\nRuntime: not probed\nMode: CPU only")
         val nativeError = cleanLog(if (xmrig) XmrigRunner.lastError() else BtcrigNative.lastError()).trim()
         val logError = recentLogError(logFile)
@@ -421,14 +426,14 @@ class ModernActivity : ComponentActivity() {
             running = running,
             service = serviceState.ifEmpty { if (running) "running" else if (expectedRunning) "missing" else "stopped" },
             stopping = serviceState == "stopping",
-            hashrate = if (running) formatHashrate(if (xmrig) XmrigRunner.hashrate() else BtcrigNative.hashrate()) else "-- H/s",
-            xmrigAlgorithm = if (running && xmrig) XmrigRunner.currentAlgorithm() else "",
-            xmrigMultiplier = if (running && xmrig) XmrigRunner.currentMultiplier(this).takeIf { it > 0.0 }?.let { String.format(Locale.US, "%.2f", it) }.orEmpty() else "",
-            workers = if (running) getString(R.string.workers_value, if (xmrig) XmrigRunner.workerCount() else BtcrigNative.workerCount()) else getString(R.string.workers_empty),
+            hashrate = if (running) formatHashrate(if (xmrigRunning) XmrigRunner.hashrate() else BtcrigNative.hashrate()) else "-- H/s",
+            xmrigAlgorithm = if (xmrigRunning) XmrigRunner.currentAlgorithm() else "",
+            xmrigMultiplier = if (xmrigRunning) XmrigRunner.currentMultiplier(this).takeIf { it > 0.0 }?.let { String.format(Locale.US, "%.2f", it) }.orEmpty() else "",
+            workers = if (running) getString(R.string.workers_value, if (xmrigRunning) XmrigRunner.workerCount() else BtcrigNative.workerCount()) else getString(R.string.workers_empty),
             total = if (running && !xmrig) getString(R.string.total_value, BtcrigNative.totalHashes()) else getString(R.string.total_empty),
-            pool = if (running) (if (xmrig) XmrigRunner.pool() else BtcrigNative.pool()).ifBlank { getString(R.string.not_configured_wrapped) } else configuredPool,
+            pool = if (running) (if (xmrigRunning) XmrigRunner.pool() else BtcrigNative.pool()).ifBlank { getString(R.string.not_configured_wrapped) } else configuredPool,
             stratum = if (running) {
-                if (xmrig) getString(if (basic.xmrigAlgo.isBlank()) R.string.xmrig_status_running else R.string.xmrig_status_running_fixed, basic.xmrigAlgo) else getString(
+                if (xmrigRunning) getString(if (basic.xmrigAlgo.isBlank()) R.string.xmrig_status_running else R.string.xmrig_status_running_fixed, basic.xmrigAlgo) else getString(
                     R.string.stratum_running,
                     BtcrigNative.stratumStatus(),
                     if (BtcrigNative.stratumConnected()) getString(R.string.yes) else getString(R.string.no),
@@ -438,13 +443,13 @@ class ModernActivity : ComponentActivity() {
                 getString(R.string.stratum_stopped)
             },
             shares = if (running) {
-                if (xmrig) getString(R.string.shares_empty) else getString(R.string.shares_running, BtcrigNative.stratumSubmits(), BtcrigNative.stratumAccepts(), BtcrigNative.stratumRejects())
+                if (xmrigRunning) getString(R.string.shares_empty) else getString(R.string.shares_running, BtcrigNative.stratumSubmits(), BtcrigNative.stratumAccepts(), BtcrigNative.stratumRejects())
             } else {
                 getString(R.string.shares_empty)
             },
             error = error,
             opencl = opencl,
-            openclDiagnosis = openclDiagnosis(opencl, basic.openclEnabled),
+            openclDiagnosis = openclDiagnosis(opencl, if (xmrig) basic.gpuCompanion else basic.openclEnabled),
             cpuSummary = cpuSummary(),
             gpuSummary = if (xmrig) {
                 val device = gpuSummary(opencl)

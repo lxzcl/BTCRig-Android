@@ -11,7 +11,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLParameters;
+import javax.net.ssl.HttpsURLConnection;
+import javax.net.ssl.SSLHandshakeException;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 import javax.net.ssl.TrustManager;
@@ -35,12 +36,10 @@ final class BtcrigTls {
             SSLSocket socket = (SSLSocket) factory.createSocket();
             socket.connect(new InetSocketAddress(host, Integer.parseInt(port)), CONNECT_TIMEOUT_MS);
             socket.setSoTimeout(CONNECT_TIMEOUT_MS);
-            if (verify) {
-                SSLParameters params = socket.getSSLParameters();
-                params.setEndpointIdentificationAlgorithm("HTTPS");
-                socket.setSSLParameters(params);
-            }
             socket.startHandshake();
+            if (verify && !HttpsURLConnection.getDefaultHostnameVerifier().verify(host, socket.getSession())) {
+                throw new SSLHandshakeException("Certificate does not match " + host);
+            }
             socket.setSoTimeout(0);
 
             int id = NEXT_ID.getAndIncrement();

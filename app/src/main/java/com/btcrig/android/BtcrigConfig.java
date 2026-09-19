@@ -244,7 +244,7 @@ final class BtcrigConfig {
     }
 
     static File writeCompanionConfig(Context context, Basic basic) throws IOException, JSONException {
-        File file = new File(context.getFilesDir(), "gpu-companion.json");
+        File file = companionConfigFile(context);
         JSONObject root = new JSONObject(read(context));
         JSONObject cpu = root.optJSONObject("cpu");
         if (cpu == null) {
@@ -261,6 +261,10 @@ final class BtcrigConfig {
         opencl.put("enabled", true);
         writeFile(file, root.toString(2));
         return file;
+    }
+
+    static File companionConfigFile(Context context) {
+        return new File(context.getFilesDir(), "gpu-companion.json");
     }
 
     private static boolean hasPool(File config) throws IOException {

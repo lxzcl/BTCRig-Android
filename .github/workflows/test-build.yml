@@ -46,13 +46,13 @@ jobs:
             keytool -list -keystore "$RUNNER_TEMP/btcrig-android.jks" -storepass "$ANDROID_KEYSTORE_PASSWORD" >/dev/null
           fi
 
-      - name: Build debug APK
+      - name: Test, lint and build debug APK
         env:
           ANDROID_KEYSTORE_FILE: ${{ runner.temp }}/btcrig-android.jks
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+        run: ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --no-daemon --stacktrace
 
       - name: Upload debug APK
         uses: actions/upload-artifact@v4

@@ -7,7 +7,7 @@ BTCRig Android is the Android client for BTCRig. It runs CPU / OpenCL mining on 
 - CPU mining
 - OpenCL / GPU mining
 - CPU + GPU mixed mining
-- Optional XMRig 6.24.0 RandomX CPU engine on Android 7.0+ arm64 devices
+- Optional MoneroOcean XMRig CPU engine with algorithm calibration and pool-selected algorithms on Android 7.0+ arm64 devices
 - Stratum TCP / TLS pool support
 - Official and unknown certificate compatibility modes
 - Background mining and keep-awake mode
@@ -26,7 +26,8 @@ BTCRig Android is the Android client for BTCRig. It runs CPU / OpenCL mining on 
 
 ## Defaults
 
-- Default pool: `stratum+tcp://public-pool.io:3333`
+- Default BTCRig pool: `stratum+tcp://public-pool.io:3333`
+- Default XMRig pool: `stratum+tcp://gulf.moneroocean.stream:10004`
 - CPU mining is enabled by default
 - OpenCL availability depends on the device GPU and system driver
 - Donation ratio defaults to `1%`; set it to `0%` to disable donation

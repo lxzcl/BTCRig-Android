@@ -53,7 +53,7 @@ class ModernActivity : ComponentActivity() {
             val initialBasic = remember { readBasic() }
             var basic by remember { mutableStateOf(initialBasic) }
             var settingsValidation by remember { mutableStateOf(validateBasicMessage(initialBasic)) }
-            var benchmark by remember { mutableStateOf(loadBenchmarkDisplayText()) }
+            var benchmark by remember { mutableStateOf(loadBenchmarkDisplayText(initialBasic)) }
             var benchmarking by remember { mutableStateOf(false) }
             var uploadingBenchmark by remember { mutableStateOf(false) }
             var stopping by remember { mutableStateOf(false) }
@@ -75,7 +75,7 @@ class ModernActivity : ComponentActivity() {
                     settingsValidation = validateBasicMessage(basic)
                     ui = readUi()
                     if (!benchmarking && !uploadingBenchmark) {
-                        benchmark = loadBenchmarkDisplayText()
+                        benchmark = loadBenchmarkDisplayText(basic)
                     }
                     refreshUpdate()
                 }
@@ -129,8 +129,66 @@ class ModernActivity : ComponentActivity() {
 
             LaunchedEffect(page) {
                 if (page == 2 && !benchmarking && !uploadingBenchmark) {
-                    benchmark = loadBenchmarkDisplayText()
+                    benchmark = loadBenchmarkDisplayText(basic)
                 }
+            }
+
+            fun startBenchmark() {
+                if (ui.running || ui.stopping) {
+                    toast(getString(R.string.stop_mining_before_benchmark))
+                    return
+                }
+                benchmarking = true
+                page = 2
+                if (basic.engine == "xmrig") {
+                    val heading = getString(R.string.xmrig_benchmark_title)
+                    val estimate = getString(R.string.xmrig_benchmark_estimate)
+                    benchmark = "$heading\n$estimate"
+                    Thread {
+                        val success = XmrigRunner.benchmark(this, basic) { algorithm ->
+                            val progress = if (algorithm.isBlank()) "" else "\n${getString(R.string.benchmark_backend_value, algorithm, getString(R.string.testing))}"
+                            runOnUiThread { benchmark = "$heading\n$estimate$progress" }
+                        }
+                        val result = if (success) loadBenchmarkDisplayText(basic) else "$heading\n${getString(R.string.xmrig_benchmark_failed)}"
+                        runOnUiThread {
+                            benchmarking = false
+                            benchmark = result
+                            ui = readUi()
+                        }
+                    }.start()
+                    return
+                }
+
+                saveBenchmarkUploadStatus("")
+                val configPath = runCatching { BtcrigConfig.ensure(this).absolutePath }.getOrDefault("")
+                val threads = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+                val benchmarkTitle = getString(R.string.benchmark)
+                val benchmarkDuration = getString(R.string.benchmark_duration_value, BENCHMARK_SECONDS)
+                val cpuFullCores = getString(R.string.cpu_full_cores_value, threads.toString())
+                val testing = getString(R.string.testing)
+                val unavailable = getString(R.string.unavailable)
+                Thread {
+                    val lines = mutableListOf(benchmarkTitle, benchmarkDuration, cpuFullCores, "")
+                    fun showTesting(label: String) {
+                        runOnUiThread { benchmark = (lines + getString(R.string.benchmark_backend_value, label, testing)).joinToString("\n") }
+                    }
+                    showTesting("CPU")
+                    val cpuHps = BtcrigNative.benchmarkCpu(BENCHMARK_SECONDS, threads)
+                    lines.add(getString(R.string.benchmark_backend_value, "CPU", if (cpuHps >= 0.0) formatHashrate(cpuHps) else unavailable))
+                    showTesting("GPU")
+                    val gpuHps = BtcrigNative.benchmarkOpencl(configPath, BENCHMARK_SECONDS)
+                    lines.add(getString(R.string.benchmark_backend_value, "GPU", if (gpuHps >= 0.0) formatHashrate(gpuHps) else unavailable))
+                    showTesting("CPU + GPU")
+                    val cpuGpuHps = if (gpuHps >= 0.0) BtcrigNative.benchmarkCpuGpu(configPath, BENCHMARK_SECONDS, threads) else -1.0
+                    lines.add(getString(R.string.benchmark_backend_value, "CPU + GPU", if (cpuGpuHps >= 0.0) formatHashrate(cpuGpuHps) else unavailable))
+                    val result = lines.joinToString("\n")
+                    saveBenchmarkText(result)
+                    runOnUiThread {
+                        benchmarking = false
+                        benchmark = result
+                        refreshLeaderboard()
+                    }
+                }.start()
             }
 
             BtcrigTheme {
@@ -144,6 +202,7 @@ class ModernActivity : ComponentActivity() {
                     leaderboard = leaderboard,
                     benchmarking = benchmarking,
                     uploadingBenchmark = uploadingBenchmark,
+                    xmrigBenchmarkNeeded = basic.engine == "xmrig" && XmrigRunner.needsBenchmark(this, basic),
                     onPage = { page = it },
                     onRankMode = { rankMode = it },
                     onOpenUpdate = { openRelease(update) },
@@ -167,45 +226,8 @@ class ModernActivity : ComponentActivity() {
                         stopBtcrigService()
                         ui = readUi().copy(service = "stopping", stopping = true)
                     },
-                    onBenchmark = {
-                        if (ui.running || ui.stopping) {
-                            toast(getString(R.string.stop_mining_before_benchmark))
-                            return@BtcrigScreen
-                        }
-                        benchmarking = true
-                        saveBenchmarkUploadStatus("")
-                        val configPath = runCatching { BtcrigConfig.ensure(this).absolutePath }.getOrDefault("")
-                        val threads = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
-                        val benchmarkTitle = getString(R.string.benchmark)
-                        val benchmarkDuration = getString(R.string.benchmark_duration_value, BENCHMARK_SECONDS)
-                        val cpuFullCores = getString(R.string.cpu_full_cores_value, threads.toString())
-                        val testing = getString(R.string.testing)
-                        val unavailable = getString(R.string.unavailable)
-                        Thread {
-                            val lines = mutableListOf(benchmarkTitle, benchmarkDuration, cpuFullCores, "")
-                            fun showTesting(label: String) {
-                                runOnUiThread {
-                                    benchmark = (lines + getString(R.string.benchmark_backend_value, label, testing)).joinToString("\n")
-                                }
-                            }
-                            showTesting("CPU")
-                            val cpuHps = BtcrigNative.benchmarkCpu(BENCHMARK_SECONDS, threads)
-                            lines.add(getString(R.string.benchmark_backend_value, "CPU", if (cpuHps >= 0.0) formatHashrate(cpuHps) else unavailable))
-                            showTesting("GPU")
-                            val gpuHps = BtcrigNative.benchmarkOpencl(configPath, BENCHMARK_SECONDS)
-                            lines.add(getString(R.string.benchmark_backend_value, "GPU", if (gpuHps >= 0.0) formatHashrate(gpuHps) else unavailable))
-                            showTesting("CPU + GPU")
-                            val cpuGpuHps = if (gpuHps >= 0.0) BtcrigNative.benchmarkCpuGpu(configPath, BENCHMARK_SECONDS, threads) else -1.0
-                            lines.add(getString(R.string.benchmark_backend_value, "CPU + GPU", if (cpuGpuHps >= 0.0) formatHashrate(cpuGpuHps) else unavailable))
-                            val result = lines.joinToString("\n")
-                            saveBenchmarkText(result)
-                            runOnUiThread {
-                                benchmarking = false
-                                benchmark = result
-                                refreshLeaderboard()
-                            }
-                        }.start()
-                    },
+                    onBenchmark = { startBenchmark() },
+                    onXmrigBenchmark = { startBenchmark() },
                     onUploadBenchmark = {
                         if (ui.running || ui.stopping) {
                             toast(getString(R.string.stop_mining_before_benchmark))
@@ -356,12 +378,14 @@ class ModernActivity : ComponentActivity() {
         return UiState(
             version = versionName(),
             engine = basic.engine,
-            backend = if (xmrig) "xmrig/randomx" else BtcrigNative.backendName(),
+            backend = if (xmrig) "xmrig/auto" else BtcrigNative.backendName(),
             selfTest = if (xmrig) XmrigRunner.isAvailable(this) else BtcrigNative.selfTest(),
             running = running,
             service = serviceState.ifEmpty { if (running) "running" else if (expectedRunning) "missing" else "stopped" },
             stopping = serviceState == "stopping",
             hashrate = if (running) formatHashrate(if (xmrig) XmrigRunner.hashrate() else BtcrigNative.hashrate()) else "-- H/s",
+            xmrigAlgorithm = if (running && xmrig) XmrigRunner.currentAlgorithm() else "",
+            xmrigMultiplier = if (running && xmrig) XmrigRunner.currentMultiplier(this).takeIf { it > 0.0 }?.let { String.format(Locale.US, "%.2f", it) }.orEmpty() else "",
             workers = if (running) getString(R.string.workers_value, if (xmrig) XmrigRunner.workerCount() else BtcrigNative.workerCount()) else getString(R.string.workers_empty),
             total = if (running && !xmrig) getString(R.string.total_value, BtcrigNative.totalHashes()) else getString(R.string.total_empty),
             pool = if (running) (if (xmrig) XmrigRunner.pool() else BtcrigNative.pool()).ifBlank { getString(R.string.not_configured_wrapped) } else configuredPool,
@@ -495,8 +519,12 @@ class ModernActivity : ComponentActivity() {
         getSharedPreferences("benchmark", MODE_PRIVATE).edit().putString("upload_status", text).apply()
     }
 
-    private fun loadBenchmarkDisplayText(): String =
-        benchmarkTextWithUpload(loadBenchmarkText(), loadBenchmarkUploadStatus())
+    private fun loadBenchmarkDisplayText(basic: BtcrigConfig.Basic): String {
+        if (basic.engine != "xmrig") return benchmarkTextWithUpload(loadBenchmarkText(), loadBenchmarkUploadStatus())
+        val summary = XmrigRunner.benchmarkSummary(this)
+        return if (summary.isBlank()) getString(R.string.xmrig_benchmark_not_run)
+        else "${getString(R.string.xmrig_benchmark_title)}\n$summary"
+    }
 
     private fun benchmarkTextWithUpload(text: String, uploadStatus: String): String =
         listOf(text.trimEnd(), uploadStatus.trim()).filter { it.isNotBlank() }.joinToString("\n")

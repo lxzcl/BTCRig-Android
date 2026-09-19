@@ -9,6 +9,8 @@ internal data class UiState(
     val service: String,
     val stopping: Boolean,
     val hashrate: String,
+    val xmrigAlgorithm: String,
+    val xmrigMultiplier: String,
     val workers: String,
     val total: String,
     val pool: String,

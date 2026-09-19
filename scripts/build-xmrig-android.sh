@@ -49,12 +49,13 @@ mkdir -p "$dummy_libs"
     -DWITH_MSR=OFF \
     -DWITH_DMI=OFF \
     -DWITH_ENV_VARS=OFF \
-    -DWITH_CN_LITE=OFF \
-    -DWITH_CN_HEAVY=OFF \
-    -DWITH_CN_PICO=OFF \
-    -DWITH_CN_FEMTO=OFF \
+    -DWITH_CN_LITE=ON \
+    -DWITH_CN_HEAVY=ON \
+    -DWITH_CN_PICO=ON \
+    -DWITH_CN_FEMTO=ON \
+    -DWITH_CN_GPU=ON \
     -DWITH_KAWPOW=OFF \
-    -DWITH_GHOSTRIDER=OFF \
+    -DWITH_GHOSTRIDER=ON \
     -DWITH_AVX2=OFF \
     -DWITH_SSE4_1=OFF
 "$cmake" --build "$xmrig_build" --target xmrig-notls

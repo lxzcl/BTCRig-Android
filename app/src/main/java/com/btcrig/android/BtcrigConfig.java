@@ -18,6 +18,8 @@ final class BtcrigConfig {
     private static final String CONFIG_NAME = "config.json";
     private static final String DEFAULT_POOL_URL = "stratum+tcp://public-pool.io:3333";
     private static final String DEFAULT_USER = "bc1qqz0wutk9kk5mmaf7fu4dm5w4fq4fhaah9hpzr3";
+    private static final String DEFAULT_XMRIG_POOL_URL = "stratum+tcp://gulf.moneroocean.stream:10004";
+    private static final String DEFAULT_XMRIG_USER = "42aaNhHtTjC5TnSbL6nrDGLFjR5eLT6gbeLzLgY6K5XifyUrKM6YGPTU55zuaFrLFdaxW2ciM5ZUFcUUsVF3bubjRuXKfsV";
 
     static final class Basic {
         String engine = "btcrig";
@@ -30,8 +32,8 @@ final class BtcrigConfig {
         boolean certCompat = true;
         boolean wakeLock = true;
         int donationPercent = 1;
-        String xmrigPoolUrl = "";
-        String xmrigUser = "";
+        String xmrigPoolUrl = DEFAULT_XMRIG_POOL_URL;
+        String xmrigUser = DEFAULT_XMRIG_USER;
         String xmrigPass = "x";
         int xmrigThreads = defaultCpuThreads();
     }

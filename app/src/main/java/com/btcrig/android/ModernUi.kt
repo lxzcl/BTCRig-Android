@@ -140,12 +140,14 @@ private fun PreviewScreen(page: Int) {
             ),
             benchmarking = false,
             uploadingBenchmark = false,
+            xmrigBenchmarkNeeded = false,
             onPage = {},
             onRankMode = {},
             onOpenUpdate = {},
             onStart = {},
             onStop = {},
             onBenchmark = {},
+            onXmrigBenchmark = {},
             onUploadBenchmark = {},
             basic = previewBasic(),
             onBasicChange = {},
@@ -167,12 +169,14 @@ internal fun BtcrigScreen(
     leaderboard: RankUi,
     benchmarking: Boolean,
     uploadingBenchmark: Boolean,
+    xmrigBenchmarkNeeded: Boolean,
     onPage: (Int) -> Unit,
     onRankMode: (String) -> Unit,
     onOpenUpdate: () -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onBenchmark: () -> Unit,
+    onXmrigBenchmark: () -> Unit,
     onUploadBenchmark: () -> Unit,
     basic: BtcrigConfig.Basic,
     onBasicChange: (BtcrigConfig.Basic) -> Unit,
@@ -204,7 +208,7 @@ internal fun BtcrigScreen(
                                 verticalArrangement = Arrangement.spacedBy(16.dp),
                             ) {
                                 PageHeader()
-                                SettingsPage(ui, basic, settingsValidation, onBasicChange, onBatteryOptimization, onJson)
+                                SettingsPage(ui, basic, settingsValidation, xmrigBenchmarkNeeded, onXmrigBenchmark, onBasicChange, onBatteryOptimization, onJson)
                             }
                         }
                         2 -> {
@@ -321,6 +325,9 @@ private fun HomePage(
                     ) {
                         Box(modifier = Modifier.height(74.dp))
                         HashrateText(ui.hashrate)
+                        if (ui.xmrigAlgorithm.isNotBlank() && ui.xmrigMultiplier.isNotBlank()) {
+                            XmrigMultiplier(ui.xmrigAlgorithm, ui.xmrigMultiplier)
+                        }
                     }
                 }
             }
@@ -483,6 +490,18 @@ private fun HashrateText(text: String) {
 }
 
 @Composable
+private fun XmrigMultiplier(algorithm: String, multiplier: String) {
+    Text(
+        buildAnnotatedString {
+            withStyle(SpanStyle(color = RigBlue, fontWeight = FontWeight.Medium)) { append(algorithm) }
+            withStyle(SpanStyle(color = Muted)) { append("  ×  ") }
+            withStyle(SpanStyle(color = Color(0xFF2F8F6B), fontWeight = FontWeight.Bold)) { append(multiplier) }
+        },
+        fontSize = 14.sp,
+    )
+}
+
+@Composable
 private fun HeroGlow(running: Boolean) {
     val transition = rememberInfiniteTransition(label = "hero")
     val pulse by transition.animateFloat(
@@ -577,6 +596,8 @@ private fun SettingsPage(
     ui: UiState,
     basic: BtcrigConfig.Basic,
     settingsValidation: String,
+    xmrigBenchmarkNeeded: Boolean,
+    onXmrigBenchmark: () -> Unit,
     onBasicChange: (BtcrigConfig.Basic) -> Unit,
     onBatteryOptimization: () -> Unit,
     onJson: () -> Unit,
@@ -663,6 +684,16 @@ private fun SettingsPage(
     if (basic.engine == "xmrig") {
         SettingSection(stringResource(R.string.settings_check), compact = true) {
             ValidationLine(settingsValidation.ifBlank { stringResource(R.string.settings_check_ok) }, settingsValidation.isNotBlank())
+            if (xmrigBenchmarkNeeded) {
+                Text(
+                    stringResource(R.string.xmrig_benchmark_prompt),
+                    modifier = Modifier.clickable(enabled = enabled && settingsValidation.isBlank(), onClick = onXmrigBenchmark),
+                    color = RigBlue,
+                    fontSize = 14.sp,
+                    lineHeight = 19.sp,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
         }
     } else {
         SettingValidationCard(settingsValidation, ui.openclDiagnosis)
@@ -784,7 +815,7 @@ private fun InfoPage(
         RigButton(
             text = if (benchmarking) stringResource(R.string.benchmarking) else stringResource(R.string.benchmark),
             onClick = onBenchmark,
-            enabled = ui.engine == "btcrig" && !benchmarking && !uploadingBenchmark && !ui.running && !ui.stopping
+            enabled = !benchmarking && !uploadingBenchmark && !ui.running && !ui.stopping
         )
         RigButton(
             text = if (uploadingBenchmark) stringResource(R.string.uploading_score) else stringResource(R.string.upload_score),

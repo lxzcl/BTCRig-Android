@@ -67,13 +67,18 @@ class ModernActivity : ComponentActivity() {
             var stopping by remember { mutableStateOf(false) }
             var rankMode by remember { mutableStateOf("all") }
             var leaderboard by remember { mutableStateOf(defaultLeaderboard()) }
+            var leaderboardRequest by remember { mutableStateOf(0) }
             var update by remember { mutableStateOf(UpdateState()) }
 
             fun refreshUpdate() {
                 checkForUpdates(ui.version) { update = it }
             }
             fun refreshLeaderboard() {
-                fetchLeaderboard(rankMode) { leaderboard = it }
+                val request = ++leaderboardRequest
+                val requestedMode = rankMode
+                fetchLeaderboard(requestedMode) {
+                    if (request == leaderboardRequest && requestedMode == rankMode) leaderboard = it
+                }
             }
 
             DisposableEffect(Unit) {
@@ -651,7 +656,6 @@ class ModernActivity : ComponentActivity() {
                         onResult(updateStateFor(currentVersion, release.version, release.url))
                     }
                     .onFailure { error ->
-                        prefs.edit().putLong("checked_at", System.currentTimeMillis()).apply()
                         onResult(updateStateFor(currentVersion, cachedVersion, cachedUrl).copy(error = error.message ?: error.javaClass.simpleName))
                     }
             }

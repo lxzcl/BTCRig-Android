@@ -10,15 +10,18 @@ import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
 
+import java.io.File;
 import java.util.Locale;
 
 public final class BtcrigService extends Service {
     static final String ACTION_STOP = "com.btcrig.android.STOP";
     private static final String CHANNEL_ID = "btcrig";
     private static final int NOTIFICATION_ID = 1;
+    private static final long RECOVERY_DELAY_MS = 15_000L;
     private PowerManager.WakeLock wakeLock;
     private volatile boolean stopping;
     private volatile boolean notificationLoopRunning;
+    private long lastRecoveryAttempt;
     private Thread notificationThread;
 
     @Override
@@ -49,23 +52,7 @@ public final class BtcrigService extends Service {
             return START_NOT_STICKY;
         }
         boolean xmrig = "xmrig".equals(basic.engine);
-        XmrigRunner.cleanupStaleProcess();
-        boolean started;
-        if (xmrig) {
-            started = XmrigRunner.start(this, basic);
-            if (started && basic.gpuCompanion) {
-                try {
-                    String companionPath = BtcrigConfig.writeCompanionConfig(this, basic).getAbsolutePath();
-                    if (!BtcrigNative.start(companionPath)) {
-                        setServiceError("GPU companion: " + BtcrigNative.lastError());
-                    }
-                } catch (Exception e) {
-                    setServiceError("GPU companion config failed: " + e.getMessage());
-                }
-            }
-        } else {
-            started = BtcrigNative.start(configPath);
-        }
+        boolean started = startConfiguredCore(basic, configPath);
         if (!started) {
             String error = xmrig ? XmrigRunner.lastError() : BtcrigNative.lastError();
             setServiceError(error == null || error.isEmpty() ? "native core failed" : error);
@@ -80,6 +67,29 @@ public final class BtcrigService extends Service {
         startNotificationLoop();
         updateNotification();
         return START_STICKY;
+    }
+
+    private synchronized boolean startConfiguredCore(BtcrigConfig.Basic basic, String configPath) {
+        if (!"xmrig".equals(basic.engine)) {
+            return BtcrigNative.isRunning() || BtcrigNative.start(configPath);
+        }
+
+        boolean started = XmrigRunner.isRunning();
+        if (!started) {
+            XmrigRunner.cleanupStaleProcess();
+            started = XmrigRunner.start(this, basic);
+        }
+        if (started && basic.gpuCompanion && !BtcrigNative.isRunning()) {
+            try {
+                String companionPath = BtcrigConfig.writeCompanionConfig(this, basic).getAbsolutePath();
+                if (!BtcrigNative.start(companionPath)) {
+                    setServiceError("GPU companion: " + BtcrigNative.lastError());
+                }
+            } catch (Exception e) {
+                setServiceError("GPU companion config failed: " + e.getMessage());
+            }
+        }
+        return started;
     }
 
     @Override
@@ -158,6 +168,11 @@ public final class BtcrigService extends Service {
                 .apply();
     }
 
+    private boolean isDesiredRunning() {
+        return getSharedPreferences("service", MODE_PRIVATE)
+                .getBoolean("desired_running", false);
+    }
+
     private void setServiceError(String error) {
         getSharedPreferences("service", MODE_PRIVATE)
                 .edit()
@@ -171,7 +186,9 @@ public final class BtcrigService extends Service {
             return;
         }
         notificationThread = new Thread(() -> {
-            while (notificationLoopRunning && isCoreRunning()) {
+            while (notificationLoopRunning) {
+                recoverCoreIfNeeded();
+                trimLogs();
                 updateNotification();
                 try {
                     Thread.sleep(5000);
@@ -182,6 +199,49 @@ public final class BtcrigService extends Service {
             updateNotification();
         }, "BTCRig-notify");
         notificationThread.start();
+    }
+
+    private void recoverCoreIfNeeded() {
+        if (stopping || !isDesiredRunning()) {
+            return;
+        }
+        BtcrigConfig.Basic basic;
+        String configPath;
+        try {
+            basic = BtcrigConfig.readBasic(this);
+            configPath = BtcrigConfig.ensure(this).getAbsolutePath();
+        } catch (Exception e) {
+            setServiceError("config read failed: " + e.getMessage());
+            return;
+        }
+        boolean primaryRunning = "xmrig".equals(basic.engine)
+                ? XmrigRunner.isRunning()
+                : BtcrigNative.isRunning();
+        boolean companionMissing = "xmrig".equals(basic.engine)
+                && basic.gpuCompanion
+                && !BtcrigNative.isRunning();
+        if (primaryRunning && !companionMissing) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (now - lastRecoveryAttempt < RECOVERY_DELAY_MS) {
+            return;
+        }
+        lastRecoveryAttempt = now;
+        if (startConfiguredCore(basic, configPath)) {
+            acquireWakeLock();
+            if (!companionMissing || BtcrigNative.isRunning()) {
+                setServiceError("");
+            }
+        } else {
+            String error = "xmrig".equals(basic.engine) ? XmrigRunner.lastError() : BtcrigNative.lastError();
+            setServiceError("auto-recovery failed: " + (error == null || error.isEmpty() ? "core failed" : error));
+        }
+    }
+
+    private void trimLogs() {
+        LogFiles.trim(new File(getFilesDir(), "btcrig.log"));
+        LogFiles.trim(XmrigRunner.logFile(this));
     }
 
     private void stopNotificationLoop() {

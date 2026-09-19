@@ -37,6 +37,7 @@ final class BtcrigConfig {
         String xmrigPass = "x";
         int xmrigThreads = defaultCpuThreads();
         String xmrigAlgo = "";
+        boolean gpuCompanion = false;
     }
 
     private BtcrigConfig() {
@@ -115,6 +116,7 @@ final class BtcrigConfig {
             basic.xmrigThreads = xmrig.optInt("threads", basic.xmrigThreads);
             String algo = xmrig.optString("algo", "").trim();
             basic.xmrigAlgo = XmrigRunner.isSupportedAlgorithm(algo) ? algo : "";
+            basic.gpuCompanion = xmrig.optBoolean("companion", false);
         }
 
         JSONArray pools = root.optJSONArray("pools");
@@ -146,6 +148,14 @@ final class BtcrigConfig {
             }
             if (basic.xmrigUser.trim().isEmpty()) {
                 throw new JSONException("XMRig wallet / user is required");
+            }
+            if (basic.gpuCompanion) {
+                if (!isPoolUrlSupported(poolUrl)) {
+                    throw new JSONException("GPU companion pool URL must start with stratum+tcp:// or stratum+tls://");
+                }
+                if (user.isEmpty()) {
+                    throw new JSONException("GPU companion wallet / user is required");
+                }
             }
         } else {
             if (!isPoolUrlSupported(poolUrl)) {
@@ -211,6 +221,7 @@ final class BtcrigConfig {
         xmrig.put("pass", basic.xmrigPass.isEmpty() ? "x" : basic.xmrigPass);
         xmrig.put("threads", Math.max(1, basic.xmrigThreads));
         xmrig.put("algo", basic.xmrigAlgo == null ? "" : basic.xmrigAlgo.trim());
+        xmrig.put("companion", basic.gpuCompanion);
 
         JSONArray pools = root.optJSONArray("pools");
         if (pools == null) {
@@ -227,6 +238,26 @@ final class BtcrigConfig {
         pool.put("pass", basic.pass.isEmpty() ? "x" : basic.pass);
         pool.put("diff", Math.max(0.0, basic.difficulty));
         write(context, root.toString(2));
+    }
+
+    static File writeCompanionConfig(Context context, Basic basic) throws IOException, JSONException {
+        File file = new File(context.getFilesDir(), "gpu-companion.json");
+        JSONObject root = new JSONObject(read(context));
+        JSONObject cpu = root.optJSONObject("cpu");
+        if (cpu == null) {
+            cpu = new JSONObject();
+            root.put("cpu", cpu);
+        }
+        cpu.put("enabled", false);
+        cpu.put("threads", 0);
+        JSONObject opencl = root.optJSONObject("opencl");
+        if (opencl == null) {
+            opencl = new JSONObject();
+            root.put("opencl", opencl);
+        }
+        opencl.put("enabled", true);
+        writeFile(file, root.toString(2));
+        return file;
     }
 
     private static boolean hasPool(File config) throws IOException {

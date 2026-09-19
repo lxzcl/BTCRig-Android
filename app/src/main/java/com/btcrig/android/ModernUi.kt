@@ -655,6 +655,24 @@ private fun SettingsPage(
                 }
             }
             Line(stringResource(R.string.xmrig_algo_helper))
+            SettingSwitchRow(stringResource(R.string.xmrig_gpu_companion), basic.gpuCompanion, enabled) {
+                onBasicChange(basic.copyBasic(gpuCompanion = it))
+            }
+            if (basic.gpuCompanion) {
+                Line(stringResource(R.string.xmrig_gpu_companion_helper))
+                SettingField(
+                    value = basic.poolUrl,
+                    onValueChange = { onBasicChange(basic.copyBasic(poolUrl = it)) },
+                    label = stringResource(R.string.pool_url),
+                    enabled = enabled,
+                )
+                SettingField(
+                    value = basic.user,
+                    onValueChange = { onBasicChange(basic.copyBasic(user = it)) },
+                    label = stringResource(R.string.user_worker),
+                    enabled = enabled,
+                )
+            }
         } else {
             SettingField(
                 value = basic.poolUrl,

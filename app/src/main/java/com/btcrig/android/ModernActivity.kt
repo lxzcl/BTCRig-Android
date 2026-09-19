@@ -357,7 +357,7 @@ class ModernActivity : ComponentActivity() {
     private fun readUi(): UiState {
         val basic = runCatching { BtcrigConfig.readBasic(this) }.getOrElse { BtcrigConfig.Basic() }
         val xmrig = basic.engine == "xmrig"
-        val running = if (xmrig) XmrigRunner.isRunning() else BtcrigNative.isRunning()
+        val running = if (xmrig) XmrigRunner.isRunning() || (basic.gpuCompanion && BtcrigNative.isRunning()) else BtcrigNative.isRunning()
         val expectedRunning = serviceExpectedRunning()
         val configPath = runCatching { BtcrigConfig.ensure(this).absolutePath }.getOrDefault(getString(R.string.unavailable_wrapped))
         val logFile = if (xmrig) XmrigRunner.logFile(this) else File(filesDir, "btcrig.log")
@@ -416,7 +416,14 @@ class ModernActivity : ComponentActivity() {
             opencl = opencl,
             openclDiagnosis = openclDiagnosis(opencl, basic.openclEnabled),
             cpuSummary = cpuSummary(),
-            gpuSummary = if (xmrig) getString(if (basic.xmrigAlgo.isBlank()) R.string.xmrig_cpu_only else R.string.xmrig_cpu_only_fixed, basic.xmrigAlgo) else gpuSummary(opencl),
+            gpuSummary = if (xmrig) {
+                if (basic.gpuCompanion) {
+                    val rate = if (BtcrigNative.isRunning()) formatHashrate(BtcrigNative.hashrate()) else getString(R.string.status_stopped)
+                    getString(R.string.xmrig_gpu_companion_status, rate)
+                } else {
+                    getString(if (basic.xmrigAlgo.isBlank()) R.string.xmrig_cpu_only else R.string.xmrig_cpu_only_fixed, basic.xmrigAlgo)
+                }
+            } else gpuSummary(opencl),
             configSummary = configSummary,
             configPath = configPath,
             logPath = logPath,
@@ -484,7 +491,19 @@ class ModernActivity : ComponentActivity() {
         if (threads !in (if (xmrig) 1 else 0)..cores) {
             return getString(if (xmrig) R.string.validation_xmrig_threads_range else R.string.validation_threads_range, cores)
         }
-        if (xmrig) return ""
+        if (xmrig) {
+            if (basic.gpuCompanion) {
+                val btcUrl = basic.poolUrl.trim()
+                if (btcUrl.isEmpty()) return getString(R.string.validation_pool_required)
+                if ('\\' in btcUrl) return getString(R.string.validation_pool_bad_chars)
+                val btcUri = runCatching { URI(btcUrl) }.getOrNull() ?: return getString(R.string.validation_pool_url)
+                if (btcUri.scheme.orEmpty().lowercase(Locale.US) !in allowedSchemes) return getString(R.string.validation_pool_scheme)
+                if (btcUri.host.isNullOrBlank()) return getString(R.string.validation_pool_host)
+                if (btcUri.port !in 1..65535) return getString(R.string.validation_pool_port)
+                if (basic.user.trim().isEmpty()) return getString(R.string.validation_user_required)
+            }
+            return ""
+        }
         if (!basic.difficulty.isFinite() || basic.difficulty < 0.0) return getString(R.string.validation_difficulty)
         if (basic.cpuThreads == 0 && !basic.openclEnabled) return getString(R.string.enable_cpu_or_opencl_first)
         return ""

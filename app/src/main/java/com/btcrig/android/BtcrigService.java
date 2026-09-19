@@ -49,9 +49,22 @@ public final class BtcrigService extends Service {
             return START_NOT_STICKY;
         }
         boolean xmrig = "xmrig".equals(basic.engine);
-        boolean started = xmrig
-                ? XmrigRunner.start(this, basic)
-                : BtcrigNative.start(configPath);
+        boolean started;
+        if (xmrig) {
+            started = XmrigRunner.start(this, basic);
+            if (started && basic.gpuCompanion) {
+                try {
+                    String companionPath = BtcrigConfig.writeCompanionConfig(this, basic).getAbsolutePath();
+                    if (!BtcrigNative.start(companionPath)) {
+                        setServiceError("GPU companion: " + BtcrigNative.lastError());
+                    }
+                } catch (Exception e) {
+                    setServiceError("GPU companion config failed: " + e.getMessage());
+                }
+            }
+        } else {
+            started = BtcrigNative.start(configPath);
+        }
         if (!started) {
             String error = xmrig ? XmrigRunner.lastError() : BtcrigNative.lastError();
             setServiceError(error == null || error.isEmpty() ? "native core failed" : error);
@@ -217,7 +230,10 @@ public final class BtcrigService extends Service {
     }
 
     private String coreStatus() {
-        return XmrigRunner.isRunning() ? "RandomX" : BtcrigNative.stratumStatus();
+        if (XmrigRunner.isRunning()) {
+            return BtcrigNative.isRunning() ? "RandomX + GPU" : "RandomX";
+        }
+        return BtcrigNative.stratumStatus();
     }
 
     private static String formatHashrate(double hps) {

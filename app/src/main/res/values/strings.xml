@@ -37,6 +37,9 @@
     <string name="xmrig_algo_label">Algorithm</string>
     <string name="xmrig_algo_auto">Auto (pool)</string>
     <string name="xmrig_algo_helper">Auto lets MoneroOcean / C3Pool pick the algorithm. Other pools are not guaranteed to be compatible.</string>
+    <string name="xmrig_gpu_companion">Also mine BTC on GPU (SHA256d)</string>
+    <string name="xmrig_gpu_companion_helper">Uses the BTCRig pool and wallet below. CPU keeps mining on XMRig; donation is at least 1% for both engines.</string>
+    <string name="xmrig_gpu_companion_status">GPU SHA256d · %1$s</string>
     <string name="xmrig_unavailable">XMRig requires Android 7.0+ on arm64-v8a.</string>
     <string name="xmrig_tcp_only">XMRig supports stratum+tcp://, stratum+tls:// and stratum+ssl:// pools.</string>
     <string name="xmrig_benchmark_prompt">After first install or an XMRig update, run the algorithm benchmark for the best return. Tap to start.</string>

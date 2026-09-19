@@ -49,6 +49,7 @@ class ModernActivity : ComponentActivity() {
             var showJson by remember { mutableStateOf(false) }
             var showLog by remember { mutableStateOf(false) }
             var logText by remember { mutableStateOf("") }
+            var logTitle by remember { mutableStateOf("btcrig.log") }
             val initialBasic = remember { readBasic() }
             var basic by remember { mutableStateOf(initialBasic) }
             var settingsValidation by remember { mutableStateOf(validateBasicMessage(initialBasic)) }
@@ -231,6 +232,7 @@ class ModernActivity : ComponentActivity() {
                     onBatteryOptimization = { requestIgnoreBatteryOptimizations() },
                     onJson = { showJson = true },
                     onLog = {
+                        logTitle = if (basic.engine == "xmrig") "xmrig.log" else "btcrig.log"
                         logText = readLogText()
                         showLog = true
                     },
@@ -256,9 +258,9 @@ class ModernActivity : ComponentActivity() {
 
                 if (showLog) {
                     TextDialog(
-                        title = "btcrig.log",
+                        title = logTitle,
                         text = logText,
-                        onCopy = { copyToClipboard("btcrig.log", logText) },
+                        onCopy = { copyToClipboard(logTitle, logText) },
                         onDismiss = { showLog = false },
                     )
                 }
@@ -318,6 +320,7 @@ class ModernActivity : ComponentActivity() {
         }.onFailure { error ->
             Thread {
                 runCatching { BtcrigNative.stop() }
+                runCatching { XmrigRunner.stop() }
                 stopService(Intent(this, BtcrigService::class.java))
             }.start()
             toast(getString(R.string.stop_failed, error.message ?: error.javaClass.simpleName))
@@ -325,43 +328,45 @@ class ModernActivity : ComponentActivity() {
     }
 
     private fun readUi(): UiState {
-        val running = BtcrigNative.isRunning()
+        val basic = runCatching { BtcrigConfig.readBasic(this) }.getOrElse { BtcrigConfig.Basic() }
+        val xmrig = basic.engine == "xmrig"
+        val running = if (xmrig) XmrigRunner.isRunning() else BtcrigNative.isRunning()
         val expectedRunning = serviceExpectedRunning()
         val configPath = runCatching { BtcrigConfig.ensure(this).absolutePath }.getOrDefault(getString(R.string.unavailable_wrapped))
-        val logFile = File(filesDir, "btcrig.log")
+        val logFile = if (xmrig) XmrigRunner.logFile(this) else File(filesDir, "btcrig.log")
         val logPath = logFile.absolutePath
         val serviceError = getSharedPreferences("service", MODE_PRIVATE).getString("last_error", "").orEmpty()
-        val configuredPool = runCatching { BtcrigConfig.readBasic(this).poolUrl.ifBlank { getString(R.string.not_configured) } }
-            .getOrDefault(getString(R.string.unavailable))
+        val configuredPool = (if (xmrig) basic.xmrigPoolUrl else basic.poolUrl).ifBlank { getString(R.string.not_configured) }
         val configSummary = runCatching {
-            val basic = BtcrigConfig.readBasic(this)
             val cpu = if (basic.cpuThreads > 0) getString(R.string.cpu_threads_value, basic.cpuThreads) else getString(R.string.disabled)
             val openclValue = if (basic.openclEnabled) getString(R.string.enabled) else getString(R.string.disabled)
-            getString(R.string.cpu_opencl_summary, cpu, openclValue)
+            if (xmrig) getString(R.string.xmrig_config_summary, basic.xmrigThreads) else getString(R.string.cpu_opencl_summary, cpu, openclValue)
         }.getOrDefault(getString(R.string.config_summary_unavailable))
         val opencl = runCatching { BtcrigNative.openclStatus(configPath) }
             .getOrDefault("Config: unavailable\nRuntime: not probed\nMode: CPU only")
-        val basic = runCatching { BtcrigConfig.readBasic(this) }.getOrElse { BtcrigConfig.Basic() }
-        val nativeError = cleanLog(BtcrigNative.lastError()).trim()
+        val nativeError = cleanLog(if (xmrig) XmrigRunner.lastError() else BtcrigNative.lastError()).trim()
         val logError = recentLogError(logFile)
         val error = readableError(serviceError.ifBlank {
-            if (nativeError.startsWith("core returned")) logError.ifBlank { nativeError } else nativeError.ifBlank { logError }
+            if (xmrig) logError.ifBlank { nativeError }
+            else if (nativeError.startsWith("core returned")) logError.ifBlank { nativeError }
+            else nativeError.ifBlank { logError }
         })
             .ifBlank { if (!running && expectedRunning) getString(R.string.service_not_running_hint) else "" }
 
         return UiState(
             version = versionName(),
-            backend = BtcrigNative.backendName(),
-            selfTest = BtcrigNative.selfTest(),
+            engine = basic.engine,
+            backend = if (xmrig) "xmrig/randomx" else BtcrigNative.backendName(),
+            selfTest = if (xmrig) XmrigRunner.isAvailable(this) else BtcrigNative.selfTest(),
             running = running,
             service = serviceState.ifEmpty { if (running) "running" else if (expectedRunning) "missing" else "stopped" },
             stopping = serviceState == "stopping",
-            hashrate = if (running) formatHashrate(BtcrigNative.hashrate()) else "-- H/s",
-            workers = if (running) getString(R.string.workers_value, BtcrigNative.workerCount()) else getString(R.string.workers_empty),
-            total = if (running) getString(R.string.total_value, BtcrigNative.totalHashes()) else getString(R.string.total_empty),
-            pool = if (running) BtcrigNative.pool().ifBlank { getString(R.string.not_configured_wrapped) } else configuredPool,
+            hashrate = if (running) formatHashrate(if (xmrig) XmrigRunner.hashrate() else BtcrigNative.hashrate()) else "-- H/s",
+            workers = if (running) getString(R.string.workers_value, if (xmrig) XmrigRunner.workerCount() else BtcrigNative.workerCount()) else getString(R.string.workers_empty),
+            total = if (running && !xmrig) getString(R.string.total_value, BtcrigNative.totalHashes()) else getString(R.string.total_empty),
+            pool = if (running) (if (xmrig) XmrigRunner.pool() else BtcrigNative.pool()).ifBlank { getString(R.string.not_configured_wrapped) } else configuredPool,
             stratum = if (running) {
-                getString(
+                if (xmrig) getString(R.string.xmrig_status_running) else getString(
                     R.string.stratum_running,
                     BtcrigNative.stratumStatus(),
                     if (BtcrigNative.stratumConnected()) getString(R.string.yes) else getString(R.string.no),
@@ -371,7 +376,7 @@ class ModernActivity : ComponentActivity() {
                 getString(R.string.stratum_stopped)
             },
             shares = if (running) {
-                getString(R.string.shares_running, BtcrigNative.stratumSubmits(), BtcrigNative.stratumAccepts(), BtcrigNative.stratumRejects())
+                if (xmrig) getString(R.string.shares_empty) else getString(R.string.shares_running, BtcrigNative.stratumSubmits(), BtcrigNative.stratumAccepts(), BtcrigNative.stratumRejects())
             } else {
                 getString(R.string.shares_empty)
             },
@@ -379,7 +384,7 @@ class ModernActivity : ComponentActivity() {
             opencl = opencl,
             openclDiagnosis = openclDiagnosis(opencl, basic.openclEnabled),
             cpuSummary = cpuSummary(),
-            gpuSummary = gpuSummary(opencl),
+            gpuSummary = if (xmrig) getString(R.string.xmrig_cpu_only) else gpuSummary(opencl),
             configSummary = configSummary,
             configPath = configPath,
             logPath = logPath,
@@ -392,7 +397,7 @@ class ModernActivity : ComponentActivity() {
         runCatching { BtcrigConfig.readBasic(this) }.getOrElse { BtcrigConfig.Basic() }
 
     private fun readLogText(): String = readTail(
-        File(filesDir, "btcrig.log"),
+        if (readBasic().engine == "xmrig") XmrigRunner.logFile(this) else File(filesDir, "btcrig.log"),
         64 * 1024,
         getString(R.string.log_not_found),
         getString(R.string.empty_log),
@@ -416,7 +421,9 @@ class ModernActivity : ComponentActivity() {
     }
 
     private fun validateBasicMessage(basic: BtcrigConfig.Basic): String {
-        val url = basic.poolUrl.trim()
+        val xmrig = basic.engine == "xmrig"
+        if (xmrig && !XmrigRunner.isAvailable(this)) return getString(R.string.xmrig_unavailable)
+        val url = (if (xmrig) basic.xmrigPoolUrl else basic.poolUrl).trim()
         if (url.isEmpty()) return getString(R.string.validation_pool_required)
         if ('\\' in url) return getString(R.string.validation_pool_bad_chars)
 
@@ -435,12 +442,17 @@ class ModernActivity : ComponentActivity() {
             "tls-insecure",
             "ssl-insecure",
         )
-        if (scheme !in allowedSchemes) return getString(R.string.validation_pool_scheme)
+        if (xmrig && scheme != "stratum+tcp") return getString(R.string.xmrig_tcp_only)
+        if (!xmrig && scheme !in allowedSchemes) return getString(R.string.validation_pool_scheme)
         if (uri.host.isNullOrBlank()) return getString(R.string.validation_pool_host)
         if (uri.port !in 1..65535) return getString(R.string.validation_pool_port)
-        if (basic.user.trim().isEmpty()) return getString(R.string.validation_user_required)
+        if ((if (xmrig) basic.xmrigUser else basic.user).trim().isEmpty()) return getString(R.string.validation_user_required)
         val cores = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
-        if (basic.cpuThreads !in 0..cores) return getString(R.string.validation_threads_range, cores)
+        val threads = if (xmrig) basic.xmrigThreads else basic.cpuThreads
+        if (threads !in (if (xmrig) 1 else 0)..cores) {
+            return getString(if (xmrig) R.string.validation_xmrig_threads_range else R.string.validation_threads_range, cores)
+        }
+        if (xmrig) return ""
         if (!basic.difficulty.isFinite() || basic.difficulty < 0.0) return getString(R.string.validation_difficulty)
         if (basic.cpuThreads == 0 && !basic.openclEnabled) return getString(R.string.enable_cpu_or_opencl_first)
         return ""

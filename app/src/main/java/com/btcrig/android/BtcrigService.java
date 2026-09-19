@@ -10,8 +10,6 @@ import android.os.Build;
 import android.os.IBinder;
 import android.os.PowerManager;
 
-import java.io.File;
-import java.io.IOException;
 import java.util.Locale;
 
 public final class BtcrigService extends Service {
@@ -39,17 +37,23 @@ public final class BtcrigService extends Service {
         createNotificationChannel();
         startForeground(NOTIFICATION_ID, buildNotification());
         setServiceError("");
-        File config;
+        BtcrigConfig.Basic basic;
+        String configPath;
         try {
-            config = BtcrigConfig.ensure(this);
-        } catch (IOException e) {
+            basic = BtcrigConfig.readBasic(this);
+            configPath = BtcrigConfig.ensure(this).getAbsolutePath();
+        } catch (Exception e) {
             setServiceError("config read failed: " + e.getMessage());
             setDesiredRunning(false);
             stopSelf();
             return START_NOT_STICKY;
         }
-        if (!BtcrigNative.start(config.getAbsolutePath())) {
-            String error = BtcrigNative.lastError();
+        boolean xmrig = "xmrig".equals(basic.engine);
+        boolean started = xmrig
+                ? XmrigRunner.start(this, basic)
+                : BtcrigNative.start(configPath);
+        if (!started) {
+            String error = xmrig ? XmrigRunner.lastError() : BtcrigNative.lastError();
             setServiceError(error == null || error.isEmpty() ? "native core failed" : error);
             setDesiredRunning(false);
             releaseWakeLock();
@@ -104,6 +108,10 @@ public final class BtcrigService extends Service {
             BtcrigNative.stop();
         } catch (Throwable ignored) {
         }
+        try {
+            XmrigRunner.stop();
+        } catch (Throwable ignored) {
+        }
     }
 
     private void acquireWakeLock() {
@@ -149,7 +157,7 @@ public final class BtcrigService extends Service {
             return;
         }
         notificationThread = new Thread(() -> {
-            while (notificationLoopRunning && BtcrigNative.isRunning()) {
+            while (notificationLoopRunning && isCoreRunning()) {
                 updateNotification();
                 try {
                     Thread.sleep(5000);
@@ -187,17 +195,29 @@ public final class BtcrigService extends Service {
                 : new Notification.Builder(this);
 
         return builder
-                .setContentTitle(BtcrigNative.isRunning()
+                .setContentTitle(isCoreRunning()
                         ? getString(R.string.notification_title_running)
                         : getString(R.string.notification_title_idle))
-                .setContentText(BtcrigNative.isRunning()
-                        ? getString(R.string.notification_mining, formatHashrate(BtcrigNative.hashrate()), BtcrigNative.stratumStatus())
+                .setContentText(isCoreRunning()
+                        ? getString(R.string.notification_mining, formatHashrate(coreHashrate()), coreStatus())
                         : getString(R.string.notification_service_idle))
                 .setSmallIcon(android.R.drawable.stat_sys_upload)
                 .setContentIntent(open)
                 .setOnlyAlertOnce(true)
                 .setOngoing(true)
                 .build();
+    }
+
+    private boolean isCoreRunning() {
+        return XmrigRunner.isRunning() || BtcrigNative.isRunning();
+    }
+
+    private double coreHashrate() {
+        return XmrigRunner.isRunning() ? XmrigRunner.hashrate() : BtcrigNative.hashrate();
+    }
+
+    private String coreStatus() {
+        return XmrigRunner.isRunning() ? "RandomX" : BtcrigNative.stratumStatus();
     }
 
     private static String formatHashrate(double hps) {

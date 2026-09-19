@@ -20,6 +20,7 @@ final class BtcrigConfig {
     private static final String DEFAULT_USER = "bc1qqz0wutk9kk5mmaf7fu4dm5w4fq4fhaah9hpzr3";
 
     static final class Basic {
+        String engine = "btcrig";
         String poolUrl = DEFAULT_POOL_URL;
         String user = DEFAULT_USER;
         String pass = "x";
@@ -29,6 +30,10 @@ final class BtcrigConfig {
         boolean certCompat = true;
         boolean wakeLock = true;
         int donationPercent = 1;
+        String xmrigPoolUrl = "";
+        String xmrigUser = "";
+        String xmrigPass = "x";
+        int xmrigThreads = defaultCpuThreads();
     }
 
     private BtcrigConfig() {
@@ -65,6 +70,7 @@ final class BtcrigConfig {
     static Basic readBasic(Context context) throws IOException, JSONException {
         JSONObject root = new JSONObject(read(context));
         Basic basic = new Basic();
+        basic.engine = "xmrig".equals(root.optString("engine")) ? "xmrig" : "btcrig";
 
         JSONObject cpu = root.optJSONObject("cpu");
         if (cpu != null) {
@@ -95,6 +101,14 @@ final class BtcrigConfig {
         basic.donationPercent = root.optInt("donation_percent", basic.donationPercent);
         basic.donationPercent = sanitizeDonationPercent(basic.donationPercent);
 
+        JSONObject xmrig = root.optJSONObject("xmrig");
+        if (xmrig != null) {
+            basic.xmrigPoolUrl = xmrig.optString("url", basic.xmrigPoolUrl);
+            basic.xmrigUser = xmrig.optString("user", basic.xmrigUser);
+            basic.xmrigPass = xmrig.optString("pass", basic.xmrigPass);
+            basic.xmrigThreads = xmrig.optInt("threads", basic.xmrigThreads);
+        }
+
         JSONArray pools = root.optJSONArray("pools");
         JSONObject pool = pools != null && pools.length() > 0 ? pools.optJSONObject(0) : null;
         if (pool != null) {
@@ -114,14 +128,25 @@ final class BtcrigConfig {
     static void writeBasic(Context context, Basic basic) throws IOException, JSONException {
         String poolUrl = basic.poolUrl.trim();
         String user = basic.user.trim();
-        if (!isPoolUrlSupported(poolUrl)) {
-            throw new JSONException("Pool URL must start with stratum+tcp:// or stratum+tls://");
-        }
-        if (user.isEmpty()) {
-            throw new JSONException("User is required");
+        boolean xmrigSelected = "xmrig".equals(basic.engine);
+        if (xmrigSelected) {
+            if (!basic.xmrigPoolUrl.trim().startsWith("stratum+tcp://")) {
+                throw new JSONException("XMRig pool URL must start with stratum+tcp://");
+            }
+            if (basic.xmrigUser.trim().isEmpty()) {
+                throw new JSONException("XMRig wallet / user is required");
+            }
+        } else {
+            if (!isPoolUrlSupported(poolUrl)) {
+                throw new JSONException("Pool URL must start with stratum+tcp:// or stratum+tls://");
+            }
+            if (user.isEmpty()) {
+                throw new JSONException("User is required");
+            }
         }
 
         JSONObject root = new JSONObject(read(context));
+        root.put("engine", xmrigSelected ? "xmrig" : "btcrig");
 
         JSONObject cpu = root.optJSONObject("cpu");
         if (cpu == null) {
@@ -161,6 +186,16 @@ final class BtcrigConfig {
         }
         root.put("donate-level", donationPercent);
         root.put("wake_lock", basic.wakeLock);
+
+        JSONObject xmrig = root.optJSONObject("xmrig");
+        if (xmrig == null) {
+            xmrig = new JSONObject();
+            root.put("xmrig", xmrig);
+        }
+        xmrig.put("url", basic.xmrigPoolUrl.trim());
+        xmrig.put("user", basic.xmrigUser.trim());
+        xmrig.put("pass", basic.xmrigPass.isEmpty() ? "x" : basic.xmrigPass);
+        xmrig.put("threads", Math.max(1, basic.xmrigThreads));
 
         JSONArray pools = root.optJSONArray("pools");
         if (pools == null) {

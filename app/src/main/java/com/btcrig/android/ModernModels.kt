@@ -2,6 +2,7 @@ package com.btcrig.android
 
 internal data class UiState(
     val version: String,
+    val engine: String,
     val backend: String,
     val selfTest: Boolean,
     val running: Boolean,

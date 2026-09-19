@@ -125,6 +125,7 @@ private fun versionParts(version: String): List<Int> {
 
 internal fun previewUi() = UiState(
     version = "0.1.0",
+    engine = "btcrig",
     backend = "arm-sha2",
     selfTest = true,
     running = true,
@@ -147,6 +148,7 @@ internal fun previewUi() = UiState(
 )
 
 internal fun previewBasic() = BtcrigConfig.Basic().apply {
+    engine = "btcrig"
     poolUrl = "stratum+tcp://public-pool.io:3333"
     user = "bc1qqz0wutk9kk5mmaf7fu4dm5w4fq4fhaah9hpzr3"
     pass = "x"
@@ -158,6 +160,7 @@ internal fun previewBasic() = BtcrigConfig.Basic().apply {
 }
 
 internal fun BtcrigConfig.Basic.copyBasic(
+    engine: String = this.engine,
     poolUrl: String = this.poolUrl,
     user: String = this.user,
     pass: String = this.pass,
@@ -167,8 +170,13 @@ internal fun BtcrigConfig.Basic.copyBasic(
     certCompat: Boolean = this.certCompat,
     wakeLock: Boolean = this.wakeLock,
     donationPercent: Int = this.donationPercent,
+    xmrigPoolUrl: String = this.xmrigPoolUrl,
+    xmrigUser: String = this.xmrigUser,
+    xmrigPass: String = this.xmrigPass,
+    xmrigThreads: Int = this.xmrigThreads,
 ): BtcrigConfig.Basic {
     val next = BtcrigConfig.Basic()
+    next.engine = if (engine == "xmrig") "xmrig" else "btcrig"
     next.poolUrl = poolUrl
     next.user = user
     next.pass = pass
@@ -178,6 +186,10 @@ internal fun BtcrigConfig.Basic.copyBasic(
     next.certCompat = certCompat
     next.wakeLock = wakeLock
     next.donationPercent = DONATION_LEVELS.find { it == donationPercent } ?: 1
+    next.xmrigPoolUrl = xmrigPoolUrl
+    next.xmrigUser = xmrigUser
+    next.xmrigPass = xmrigPass
+    next.xmrigThreads = xmrigThreads.coerceAtLeast(1)
     return next
 }
 

@@ -16,6 +16,7 @@
     <string name="validation_pool_port">矿池地址缺少有效端口。</string>
     <string name="validation_user_required">钱包地址 / 用户不能为空。</string>
     <string name="validation_threads_range">CPU 数量必须是 0–%1$d。</string>
+    <string name="validation_xmrig_threads_range">XMRig CPU 数量必须是 1–%1$d。</string>
     <string name="validation_difficulty">难度必须大于等于 0。</string>
     <string name="tab_home">首页</string>
     <string name="tab_settings">设置</string>
@@ -26,11 +27,15 @@
     <string name="status_stopped">已停止</string>
     <string name="status_service_missing">需要重启服务</string>
     <string name="pool_label">矿池</string>
+    <string name="mining_engine">引擎</string>
     <string name="last_error">最近错误</string>
     <string name="recent_error">最近错误</string>
     <string name="no_recent_errors">暂无最近错误</string>
     <string name="page_subtitle">原生 CPU / OpenCL 挖矿</string>
     <string name="settings_title">设置</string>
+    <string name="xmrig_compatibility">XMRig 6.24.0 · RandomX 仅 CPU · Android 7.0+ / arm64-v8a · TCP 矿池</string>
+    <string name="xmrig_unavailable">XMRig 需要 Android 7.0+ 和 arm64-v8a。</string>
+    <string name="xmrig_tcp_only">当前 XMRig 预览版仅支持 stratum+tcp:// 矿池。</string>
     <string name="pool_url">矿池地址</string>
     <string name="user_worker">用户 / worker</string>
     <string name="password">密码</string>
@@ -124,6 +129,9 @@
     <string name="config_summary_unavailable">配置摘要不可用</string>
     <string name="cpu_threads_value">%1$d 线程</string>
     <string name="cpu_opencl_summary">CPU：%1$s / OpenCL：%2$s</string>
+    <string name="xmrig_config_summary">XMRig RandomX：%1$d 个 CPU 线程</string>
+    <string name="xmrig_status_running">XMRig RandomX：运行中</string>
+    <string name="xmrig_cpu_only">XMRig RandomX · 仅 CPU</string>
     <string name="workers_value">工作线程：%1$d</string>
     <string name="workers_empty">工作线程：--</string>
     <string name="total_value">总哈希：%1$d</string>

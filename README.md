@@ -7,6 +7,7 @@ BTCRig Android is the Android client for BTCRig. It runs CPU / OpenCL mining on 
 - CPU mining
 - OpenCL / GPU mining
 - CPU + GPU mixed mining
+- Optional XMRig 6.24.0 RandomX CPU engine on Android 7.0+ arm64 devices
 - Stratum TCP / TLS pool support
 - Official and unknown certificate compatibility modes
 - Background mining and keep-awake mode
@@ -33,8 +34,11 @@ BTCRig Android is the Android client for BTCRig. It runs CPU / OpenCL mining on 
 ## Build
 
 ```bash
+git submodule update --init --recursive
 ./gradlew :app:assembleDebug
 ```
+
+The first build also compiles the bundled XMRig and libuv sources for arm64-v8a.
 
 Debug APK output:
 
@@ -46,4 +50,4 @@ Release APKs are built by GitHub Actions and published to Releases.
 
 ## License
 
-BTCRig Android is licensed under GPL-3.0. See [LICENSE](LICENSE).
+BTCRig Android is licensed under GPL-3.0. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

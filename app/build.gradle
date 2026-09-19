@@ -71,10 +71,40 @@ android {
         compose = true
     }
 
+    packaging {
+        jniLibs.useLegacyPackaging = true
+    }
+
+    sourceSets {
+        main.jniLibs.srcDir(file("build/generated/xmrig/jniLibs"))
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+}
+
+def xmrigOutput = layout.buildDirectory.dir("generated/xmrig/jniLibs")
+def androidSdkDir = System.getenv("ANDROID_HOME") ?: System.getenv("ANDROID_SDK_ROOT")
+if (!androidSdkDir) {
+    def localProperties = new Properties()
+    rootProject.file("local.properties").withInputStream { localProperties.load(it) }
+    androidSdkDir = localProperties.getProperty("sdk.dir")
+}
+def buildXmrigArm64 = tasks.register("buildXmrigArm64", Exec) {
+    inputs.file(rootProject.file("scripts/build-xmrig-android.sh"))
+    inputs.dir(file("src/main/cpp/third_party/xmrig"))
+    inputs.dir(file("src/main/cpp/third_party/libuv"))
+    outputs.file(xmrigOutput.map { it.file("arm64-v8a/libxmrig.so") })
+    commandLine "bash",
+        rootProject.file("scripts/build-xmrig-android.sh"),
+        androidSdkDir,
+        xmrigOutput.get().asFile.absolutePath
+}
+
+tasks.named("preBuild").configure {
+    dependsOn(buildXmrigArm64)
 }
 
 dependencies {

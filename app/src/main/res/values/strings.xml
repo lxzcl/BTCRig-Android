@@ -34,6 +34,9 @@
     <string name="page_subtitle">Native CPU / OpenCL miner</string>
     <string name="settings_title">Settings</string>
     <string name="xmrig_compatibility">MoneroOcean XMRig 6.26.0 · CPU algorithms · Android 7.0+ / arm64-v8a · TCP pools</string>
+    <string name="xmrig_algo_label">Algorithm</string>
+    <string name="xmrig_algo_auto">Auto (pool)</string>
+    <string name="xmrig_algo_helper">Auto lets MoneroOcean / C3Pool pick the algorithm. Choose a fixed algorithm for regular pools.</string>
     <string name="xmrig_unavailable">XMRig requires Android 7.0+ on arm64-v8a.</string>
     <string name="xmrig_tcp_only">This XMRig preview currently supports stratum+tcp:// pools.</string>
     <string name="xmrig_benchmark_prompt">After first install or an XMRig update, run the algorithm benchmark for the best return. Tap to start.</string>
@@ -135,8 +138,11 @@
     <string name="cpu_threads_value">%1$d threads</string>
     <string name="cpu_opencl_summary">CPU: %1$s / OpenCL: %2$s</string>
     <string name="xmrig_config_summary">XMRig auto algorithm: %1$d CPU threads</string>
+    <string name="xmrig_config_summary_fixed">XMRig %1$s: %2$d CPU threads</string>
     <string name="xmrig_status_running">XMRig auto algorithm: running</string>
+    <string name="xmrig_status_running_fixed">XMRig %1$s: running</string>
     <string name="xmrig_cpu_only">XMRig auto algorithm · CPU only</string>
+    <string name="xmrig_cpu_only_fixed">XMRig %1$s · CPU only</string>
     <string name="workers_value">Workers: %1$d</string>
     <string name="workers_empty">Workers: --</string>
     <string name="total_value">Total: %1$d</string>

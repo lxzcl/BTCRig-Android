@@ -36,6 +36,7 @@ final class BtcrigConfig {
         String xmrigUser = DEFAULT_XMRIG_USER;
         String xmrigPass = "x";
         int xmrigThreads = defaultCpuThreads();
+        String xmrigAlgo = "";
     }
 
     private BtcrigConfig() {
@@ -109,6 +110,8 @@ final class BtcrigConfig {
             basic.xmrigUser = xmrig.optString("user", basic.xmrigUser);
             basic.xmrigPass = xmrig.optString("pass", basic.xmrigPass);
             basic.xmrigThreads = xmrig.optInt("threads", basic.xmrigThreads);
+            String algo = xmrig.optString("algo", "").trim();
+            basic.xmrigAlgo = XmrigRunner.isSupportedAlgorithm(algo) ? algo : "";
         }
 
         JSONArray pools = root.optJSONArray("pools");
@@ -198,6 +201,7 @@ final class BtcrigConfig {
         xmrig.put("user", basic.xmrigUser.trim());
         xmrig.put("pass", basic.xmrigPass.isEmpty() ? "x" : basic.xmrigPass);
         xmrig.put("threads", Math.max(1, basic.xmrigThreads));
+        xmrig.put("algo", basic.xmrigAlgo == null ? "" : basic.xmrigAlgo.trim());
 
         JSONArray pools = root.optJSONArray("pools");
         if (pools == null) {

@@ -16,6 +16,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -591,6 +593,7 @@ private fun SpecRow(name: String, value: String) {
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SettingsPage(
     ui: UiState,
@@ -634,6 +637,22 @@ private fun SettingsPage(
                 label = stringResource(R.string.cpu_threads),
                 enabled = enabled,
             )
+            Line(stringResource(R.string.xmrig_algo_label))
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                RankChip(stringResource(R.string.xmrig_algo_auto), basic.xmrigAlgo.isBlank()) {
+                    if (enabled) onBasicChange(basic.copyBasic(xmrigAlgo = ""))
+                }
+                XmrigRunner.supportedAlgorithms().forEach { algorithm ->
+                    RankChip(algorithm, basic.xmrigAlgo == algorithm) {
+                        if (enabled) onBasicChange(basic.copyBasic(xmrigAlgo = algorithm))
+                    }
+                }
+            }
+            Line(stringResource(R.string.xmrig_algo_helper))
         } else {
             SettingField(
                 value = basic.poolUrl,
@@ -914,16 +933,21 @@ private fun ColumnScope.RankPage(
 
 @Composable
 private fun RowScope.RankModeButton(text: String, selected: Boolean, onClick: () -> Unit) {
+    RankChip(text, selected, Modifier.weight(1f), onClick)
+}
+
+@Composable
+private fun RankChip(text: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
-        modifier = Modifier.weight(1f),
+        modifier = modifier,
         shape = RoundedCornerShape(999.dp),
         color = if (selected) SoftBlue else Color.White,
         border = androidx.compose.foundation.BorderStroke(1.dp, if (selected) RigBlue else Color(0xFFE2E5EC)),
     ) {
         Text(
             text,
-            modifier = Modifier.padding(vertical = 9.dp),
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
             textAlign = TextAlign.Center,
             color = if (selected) Accent else Muted,
             fontSize = 13.sp,

@@ -34,6 +34,9 @@
     <string name="page_subtitle">原生 CPU / OpenCL 挖矿</string>
     <string name="settings_title">设置</string>
     <string name="xmrig_compatibility">MoneroOcean XMRig 6.26.0 · CPU 多算法 · Android 7.0+ / arm64-v8a · TCP 矿池</string>
+    <string name="xmrig_algo_label">算法</string>
+    <string name="xmrig_algo_auto">自动（矿池）</string>
+    <string name="xmrig_algo_helper">自动模式由 MoneroOcean / C3Pool 等矿池选择算法；普通矿池请选择固定算法。</string>
     <string name="xmrig_unavailable">XMRig 需要 Android 7.0+ 和 arm64-v8a。</string>
     <string name="xmrig_tcp_only">当前 XMRig 预览版仅支持 stratum+tcp:// 矿池。</string>
     <string name="xmrig_benchmark_prompt">首次安装或 XMRig 更新后请进行算法测试，以获得更高收益。点击开始测试。</string>
@@ -135,8 +138,11 @@
     <string name="cpu_threads_value">%1$d 线程</string>
     <string name="cpu_opencl_summary">CPU：%1$s / OpenCL：%2$s</string>
     <string name="xmrig_config_summary">XMRig 自动算法：%1$d 个 CPU 线程</string>
+    <string name="xmrig_config_summary_fixed">XMRig %1$s：%2$d 个 CPU 线程</string>
     <string name="xmrig_status_running">XMRig 自动算法：运行中</string>
+    <string name="xmrig_status_running_fixed">XMRig %1$s：运行中</string>
     <string name="xmrig_cpu_only">XMRig 自动算法 · 仅 CPU</string>
+    <string name="xmrig_cpu_only_fixed">XMRig %1$s · 仅 CPU</string>
     <string name="workers_value">工作线程：%1$d</string>
     <string name="workers_empty">工作线程：--</string>
     <string name="total_value">总哈希：%1$d</string>

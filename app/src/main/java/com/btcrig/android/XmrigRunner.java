@@ -39,6 +39,18 @@ final class XmrigRunner {
 
     private XmrigRunner() {}
 
+    static String[] supportedAlgorithms() {
+        return BENCHMARK_ALGOS.clone();
+    }
+
+    static boolean isSupportedAlgorithm(String name) {
+        if (name == null) return false;
+        for (String algorithm : BENCHMARK_ALGOS) {
+            if (algorithm.equals(name)) return true;
+        }
+        return false;
+    }
+
     static synchronized boolean start(Context context, BtcrigConfig.Basic basic) {
         if (isRunning()) return true;
         if (!isAvailable(context)) {
@@ -53,8 +65,11 @@ final class XmrigRunner {
 
         try {
             boolean calibrated = !needsBenchmark(context, basic);
-            List<String> command = command(binary(context), prepareConfig(configFile(context), basic, calibrated), basic, logFile);
-            if (!calibrated) command.add("--algo=rx/0");
+            String fixed = basic.xmrigAlgo == null ? "" : basic.xmrigAlgo.trim();
+            boolean fixedAlgorithm = isSupportedAlgorithm(fixed);
+            List<String> command = command(binary(context), prepareConfig(configFile(context), basic, calibrated, fixedAlgorithm), basic, logFile);
+            if (fixedAlgorithm) command.add("--algo=" + fixed);
+            else if (!calibrated) command.add("--algo=rx/0");
             new FileOutputStream(logFile, false).close();
             process = new ProcessBuilder(command)
                     .directory(context.getFilesDir())
@@ -76,7 +91,7 @@ final class XmrigRunner {
         File benchmarkLog = new File(context.getFilesDir(), "xmrig-benchmark.log");
         Process benchmark = null;
         try {
-            File config = prepareConfig(benchmarkConfigFile(context), basic, false);
+            File config = prepareConfig(benchmarkConfigFile(context), basic, false, false);
             List<String> command = command(binary(context), config, basic, benchmarkLog);
             command.add("--rebench-algo");
             command.add("--bench-algo-time=3");
@@ -96,7 +111,7 @@ final class XmrigRunner {
                 if (text.contains("ALGO PERFORMANCE CALIBRATION COMPLETE")) {
                     JSONObject perf = parseBenchmark(text);
                     if (perf.length() == 0 || perf.optDouble("rx/0", -1.0) <= 0.0) return false;
-                    savePerformance(prepareConfig(configFile(context), basic, true), perf);
+                    savePerformance(prepareConfig(configFile(context), basic, true, isSupportedAlgorithm(basic.xmrigAlgo)), perf);
                     markBenchmarkComplete(context, basic);
                     progress.accept("");
                     return true;
@@ -215,7 +230,7 @@ final class XmrigRunner {
         return command;
     }
 
-    private static File prepareConfig(File file, BtcrigConfig.Basic basic, boolean calibrated) throws Exception {
+    private static File prepareConfig(File file, BtcrigConfig.Basic basic, boolean calibrated, boolean fixedAlgorithm) throws Exception {
         JSONObject root = readJson(file);
         root.put("autosave", false);
         root.put("btcrig-calibrated", calibrated);
@@ -228,7 +243,9 @@ final class XmrigRunner {
                 .put("user", basic.xmrigUser.trim())
                 .put("pass", basic.xmrigPass.isEmpty() ? "x" : basic.xmrigPass)
                 .put("keepalive", true)));
-        if (!calibrated) {
+        if (fixedAlgorithm) {
+            root.remove("algo-perf");
+        } else if (!calibrated) {
             JSONObject placeholder = new JSONObject();
             for (String name : BENCHMARK_ALGOS) placeholder.put(name, 1.0);
             root.put("algo-perf", placeholder);

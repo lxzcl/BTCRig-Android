@@ -207,7 +207,7 @@ class ModernActivity : ComponentActivity() {
                     leaderboard = leaderboard,
                     benchmarking = benchmarking,
                     uploadingBenchmark = uploadingBenchmark,
-                    xmrigBenchmarkNeeded = basic.engine == "xmrig" && XmrigRunner.needsBenchmark(this, basic),
+                    xmrigBenchmarkNeeded = basic.engine == "xmrig" && basic.xmrigAlgo.isBlank() && XmrigRunner.needsBenchmark(this, basic),
                     onPage = { page = it },
                     onRankMode = { rankMode = it },
                     onOpenUpdate = { openRelease(update) },
@@ -367,7 +367,10 @@ class ModernActivity : ComponentActivity() {
         val configSummary = runCatching {
             val cpu = if (basic.cpuThreads > 0) getString(R.string.cpu_threads_value, basic.cpuThreads) else getString(R.string.disabled)
             val openclValue = if (basic.openclEnabled) getString(R.string.enabled) else getString(R.string.disabled)
-            if (xmrig) getString(R.string.xmrig_config_summary, basic.xmrigThreads) else getString(R.string.cpu_opencl_summary, cpu, openclValue)
+            if (xmrig) {
+                if (basic.xmrigAlgo.isBlank()) getString(R.string.xmrig_config_summary, basic.xmrigThreads)
+                else getString(R.string.xmrig_config_summary_fixed, basic.xmrigAlgo, basic.xmrigThreads)
+            } else getString(R.string.cpu_opencl_summary, cpu, openclValue)
         }.getOrDefault(getString(R.string.config_summary_unavailable))
         val opencl = runCatching { BtcrigNative.openclStatus(configPath) }
             .getOrDefault("Config: unavailable\nRuntime: not probed\nMode: CPU only")
@@ -383,7 +386,7 @@ class ModernActivity : ComponentActivity() {
         return UiState(
             version = versionName(),
             engine = basic.engine,
-            backend = if (xmrig) "xmrig/auto" else BtcrigNative.backendName(),
+            backend = if (xmrig) (if (basic.xmrigAlgo.isBlank()) "xmrig/auto" else "xmrig/" + basic.xmrigAlgo) else BtcrigNative.backendName(),
             selfTest = if (xmrig) XmrigRunner.isAvailable(this) else BtcrigNative.selfTest(),
             running = running,
             service = serviceState.ifEmpty { if (running) "running" else if (expectedRunning) "missing" else "stopped" },
@@ -395,7 +398,7 @@ class ModernActivity : ComponentActivity() {
             total = if (running && !xmrig) getString(R.string.total_value, BtcrigNative.totalHashes()) else getString(R.string.total_empty),
             pool = if (running) (if (xmrig) XmrigRunner.pool() else BtcrigNative.pool()).ifBlank { getString(R.string.not_configured_wrapped) } else configuredPool,
             stratum = if (running) {
-                if (xmrig) getString(R.string.xmrig_status_running) else getString(
+                if (xmrig) getString(if (basic.xmrigAlgo.isBlank()) R.string.xmrig_status_running else R.string.xmrig_status_running_fixed, basic.xmrigAlgo) else getString(
                     R.string.stratum_running,
                     BtcrigNative.stratumStatus(),
                     if (BtcrigNative.stratumConnected()) getString(R.string.yes) else getString(R.string.no),
@@ -413,7 +416,7 @@ class ModernActivity : ComponentActivity() {
             opencl = opencl,
             openclDiagnosis = openclDiagnosis(opencl, basic.openclEnabled),
             cpuSummary = cpuSummary(),
-            gpuSummary = if (xmrig) getString(R.string.xmrig_cpu_only) else gpuSummary(opencl),
+            gpuSummary = if (xmrig) getString(if (basic.xmrigAlgo.isBlank()) R.string.xmrig_cpu_only else R.string.xmrig_cpu_only_fixed, basic.xmrigAlgo) else gpuSummary(opencl),
             configSummary = configSummary,
             configPath = configPath,
             logPath = logPath,

@@ -176,6 +176,7 @@ internal fun BtcrigConfig.Basic.copyBasic(
     xmrigUser: String = this.xmrigUser,
     xmrigPass: String = this.xmrigPass,
     xmrigThreads: Int = this.xmrigThreads,
+    xmrigAlgo: String = this.xmrigAlgo,
 ): BtcrigConfig.Basic {
     val next = BtcrigConfig.Basic()
     next.engine = if (engine == "xmrig") "xmrig" else "btcrig"
@@ -192,6 +193,7 @@ internal fun BtcrigConfig.Basic.copyBasic(
     next.xmrigUser = xmrigUser
     next.xmrigPass = xmrigPass
     next.xmrigThreads = xmrigThreads.coerceAtLeast(1)
+    next.xmrigAlgo = if (XmrigRunner.isSupportedAlgorithm(xmrigAlgo)) xmrigAlgo else ""
     return next
 }
 

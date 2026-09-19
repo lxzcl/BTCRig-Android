@@ -228,7 +228,14 @@ public final class BtcrigService extends Service {
             return;
         }
         lastRecoveryAttempt = now;
-        if (startConfiguredCore(basic, configPath)) {
+        boolean started = startConfiguredCore(basic, configPath);
+        if (stopping || !isDesiredRunning()) {
+            if (started) {
+                safeStopCore();
+            }
+            return;
+        }
+        if (started) {
             acquireWakeLock();
             if (!companionMissing || BtcrigNative.isRunning()) {
                 setServiceError("");

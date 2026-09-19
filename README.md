@@ -78,4 +78,4 @@ Release APKs are built by GitHub Actions and published to Releases.
 
 BTCRig Android is licensed under GPL-3.0. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-The app includes a 1% developer donation by default, adjustable in Settings; the XMRig engine keeps a 1% minimum. BTC: `bc1qqz0wutk9kk5mmaf7fu4dm5w4fq4fhaah9hpzr3`
+XMRig mining (alone or together with BTC) keeps a 1% developer donation; BTC-only mining can be set to 0%.

@@ -24,6 +24,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #else
+#include <fcntl.h>
 #include <netdb.h>
 #include <signal.h>
 #include <sys/select.h>
@@ -32,6 +33,9 @@
 #include <termios.h>
 #include <unistd.h>
 #endif
+
+#define CONNECT_TIMEOUT_MS 10000
+#define CONNECT_POLL_MS 250
 
 typedef struct {
     char host[256];
@@ -129,6 +133,67 @@ static int socket_interrupted_or_would_block(void) {
 #endif
 }
 
+static int socket_connect_in_progress(void) {
+#if defined(_WIN32)
+    int err = WSAGetLastError();
+    return err == WSAEINPROGRESS || err == WSAEWOULDBLOCK;
+#else
+    return errno == EINPROGRESS || errno == EWOULDBLOCK;
+#endif
+}
+
+static int socket_set_nonblocking(int fd, int enabled) {
+#if defined(_WIN32)
+    u_long mode = enabled ? 1UL : 0UL;
+    return ioctlsocket((SOCKET)fd, FIONBIO, &mode) == 0 ? 0 : -1;
+#else
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0) {
+        return -1;
+    }
+    return fcntl(fd, F_SETFL, enabled ? flags | O_NONBLOCK : flags & ~O_NONBLOCK);
+#endif
+}
+
+static int connect_with_timeout(int fd, const struct sockaddr *address, int address_len, int timeout_ms) {
+    if (socket_set_nonblocking(fd, 1) != 0) {
+        return -1;
+    }
+    if (connect(fd, address, address_len) == 0) {
+        return socket_set_nonblocking(fd, 0);
+    }
+    if (!socket_connect_in_progress()) {
+        return -1;
+    }
+
+    while (timeout_ms > 0 && !btcrig_android_core_should_stop()) {
+        int wait_ms = timeout_ms < CONNECT_POLL_MS ? timeout_ms : CONNECT_POLL_MS;
+        fd_set writefds;
+        FD_ZERO(&writefds);
+        FD_SET(fd, &writefds);
+        struct timeval tv = {wait_ms / 1000, (wait_ms % 1000) * 1000};
+        int ready = select(fd + 1, NULL, &writefds, NULL, &tv);
+        if (ready > 0) {
+            int socket_error = 0;
+#if defined(_WIN32)
+            int error_len = sizeof(socket_error);
+            if (getsockopt((SOCKET)fd, SOL_SOCKET, SO_ERROR, (char *)&socket_error, &error_len) == 0 && socket_error == 0) {
+#else
+            socklen_t error_len = sizeof(socket_error);
+            if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &socket_error, &error_len) == 0 && socket_error == 0) {
+#endif
+                return socket_set_nonblocking(fd, 0);
+            }
+            return -1;
+        }
+        if (ready < 0 && !socket_interrupted_or_would_block()) {
+            return -1;
+        }
+        timeout_ms -= wait_ms;
+    }
+    return -1;
+}
+
 void stratum_state_init(stratum_state_t *state) {
     memset(state, 0, sizeof(*state));
     state->difficulty = 1.0;
@@ -217,6 +282,7 @@ static int connect_tcp(const pool_endpoint_t *endpoint) {
     struct addrinfo *result = NULL;
     struct addrinfo *rp = NULL;
     int fd = -1;
+    double deadline = monotonic_seconds() + (double)CONNECT_TIMEOUT_MS / 1000.0;
 
     if (network_init() != 0) {
         return -1;
@@ -239,7 +305,8 @@ static int connect_tcp(const pool_endpoint_t *endpoint) {
             continue;
         }
 
-        if (connect(fd, rp->ai_addr, rp->ai_addrlen) == 0) {
+        int remaining_ms = (int)((deadline - monotonic_seconds()) * 1000.0);
+        if (remaining_ms > 0 && connect_with_timeout(fd, rp->ai_addr, (int)rp->ai_addrlen, remaining_ms) == 0) {
             break;
         }
 

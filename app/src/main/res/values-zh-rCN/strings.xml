@@ -38,7 +38,6 @@
     <string name="xmrig_algo_helper">自动模式由 MoneroOcean / C3Pool 等矿池选择算法；其他矿池不保证兼容。</string>
     <string name="xmrig_gpu_companion">同时用 GPU 挖 BTC（SHA256d）</string>
     <string name="xmrig_gpu_companion_helper">使用下方 BTCRig 矿池和钱包；CPU 继续跑 XMRig。</string>
-    <string name="xmrig_gpu_companion_status">GPU SHA256d · %1$s</string>
     <string name="xmrig_gpu_cpu_only">仅 CPU</string>
     <string name="xmrig_unavailable">XMRig 需要 Android 7.0+ 和 arm64-v8a。</string>
     <string name="xmrig_tcp_only">XMRig 支持 stratum+tcp://、stratum+tls:// 和 stratum+ssl:// 矿池。</string>

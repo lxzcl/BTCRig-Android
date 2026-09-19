@@ -417,11 +417,12 @@ class ModernActivity : ComponentActivity() {
             openclDiagnosis = openclDiagnosis(opencl, basic.openclEnabled),
             cpuSummary = cpuSummary(),
             gpuSummary = if (xmrig) {
+                val device = gpuSummary(opencl)
                 if (basic.gpuCompanion) {
                     val rate = if (BtcrigNative.isRunning()) formatHashrate(BtcrigNative.hashrate()) else getString(R.string.status_stopped)
-                    getString(R.string.xmrig_gpu_companion_status, rate)
+                    "$device · $rate"
                 } else {
-                    getString(R.string.xmrig_gpu_cpu_only)
+                    "$device · ${getString(R.string.xmrig_gpu_cpu_only)}"
                 }
             } else gpuSummary(opencl),
             configSummary = configSummary,

@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -1133,17 +1134,12 @@ private fun DonationCard(percent: Int, minPercent: Int, enabled: Boolean, onChan
 
 @Composable
 private fun BenchmarkBox(text: String) {
-    val scroll = rememberScrollState()
-    LaunchedEffect(text, scroll.maxValue) {
-        scroll.scrollTo(scroll.maxValue)
-    }
     SoftCard(compact = true) {
         Text(
             text,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(144.dp)
-                .verticalScroll(scroll),
+                .heightIn(min = 144.dp),
             color = MaterialTheme.colorScheme.secondary,
             fontFamily = FontFamily.Monospace,
             fontSize = 14.sp,

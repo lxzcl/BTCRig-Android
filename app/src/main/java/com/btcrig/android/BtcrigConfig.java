@@ -138,8 +138,11 @@ final class BtcrigConfig {
         String user = basic.user.trim();
         boolean xmrigSelected = "xmrig".equals(basic.engine);
         if (xmrigSelected) {
-            if (!basic.xmrigPoolUrl.trim().startsWith("stratum+tcp://")) {
-                throw new JSONException("XMRig pool URL must start with stratum+tcp://");
+            String xmrigUrl = basic.xmrigPoolUrl.trim();
+            if (!xmrigUrl.startsWith("stratum+tcp://") &&
+                    !xmrigUrl.startsWith("stratum+tls://") &&
+                    !xmrigUrl.startsWith("stratum+ssl://")) {
+                throw new JSONException("XMRig pool URL must start with stratum+tcp://, stratum+tls:// or stratum+ssl://");
             }
             if (basic.xmrigUser.trim().isEmpty()) {
                 throw new JSONException("XMRig wallet / user is required");

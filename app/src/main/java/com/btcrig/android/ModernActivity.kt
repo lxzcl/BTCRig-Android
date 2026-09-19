@@ -474,7 +474,7 @@ class ModernActivity : ComponentActivity() {
             "tls-insecure",
             "ssl-insecure",
         )
-        if (xmrig && scheme != "stratum+tcp") return getString(R.string.xmrig_tcp_only)
+        if (xmrig && scheme !in setOf("stratum+tcp", "stratum+tls", "stratum+ssl")) return getString(R.string.xmrig_tcp_only)
         if (!xmrig && scheme !in allowedSchemes) return getString(R.string.validation_pool_scheme)
         if (uri.host.isNullOrBlank()) return getString(R.string.validation_pool_host)
         if (uri.port !in 1..65535) return getString(R.string.validation_pool_port)

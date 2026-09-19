@@ -421,7 +421,7 @@ class ModernActivity : ComponentActivity() {
                     val rate = if (BtcrigNative.isRunning()) formatHashrate(BtcrigNative.hashrate()) else getString(R.string.status_stopped)
                     getString(R.string.xmrig_gpu_companion_status, rate)
                 } else {
-                    getString(if (basic.xmrigAlgo.isBlank()) R.string.xmrig_cpu_only else R.string.xmrig_cpu_only_fixed, basic.xmrigAlgo)
+                    getString(R.string.xmrig_gpu_cpu_only)
                 }
             } else gpuSummary(opencl),
             configSummary = configSummary,

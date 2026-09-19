@@ -351,7 +351,7 @@ private fun HomePage(
             EnterUp(delayMillis = 320) {
                 Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     SpecRow("CPU", ui.cpuSummary)
-                    SpecRow(if (ui.engine == "xmrig") stringResource(R.string.mining_engine) else "GPU", ui.gpuSummary)
+                    SpecRow("GPU", ui.gpuSummary)
                     SpecRow(stringResource(R.string.pool_label), ui.pool)
                 }
             }

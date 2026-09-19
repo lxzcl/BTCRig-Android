@@ -6,3 +6,5 @@ BTCRig Android bundles the following software:
 - [libuv 1.51.0](https://github.com/libuv/libuv/tree/v1.51.0), licensed under the MIT License. Its source and license notice are included as the `app/src/main/cpp/third_party/libuv` submodule.
 
 The exact source revisions and Android build instructions are recorded by `.gitmodules`, the submodule commits, and `scripts/build-xmrig-android.sh`.
+
+Local modification: `scripts/xmrig-disable-donate.patch` disables the built-in XMRig/MoneroOcean developer donation path (`Pools::load` forces a 0% donate level). The build script applies this patch to a copy of the submodule source before compiling.

@@ -11,6 +11,8 @@ libuv_src="$root_dir/app/src/main/cpp/third_party/libuv"
 build_dir="$root_dir/app/build/xmrig"
 libuv_build="$build_dir/libuv"
 xmrig_build="$build_dir/xmrig"
+xmrig_patch="$root_dir/scripts/xmrig-disable-donate.patch"
+xmrig_patched_src="$build_dir/xmrig-src"
 dummy_libs="$build_dir/dummy-libs"
 toolchain="$ndk_dir/build/cmake/android.toolchain.cmake"
 
@@ -32,7 +34,12 @@ mkdir -p "$dummy_libs"
 "$ndk_dir/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar" rcs "$dummy_libs/libpthread.a"
 "$ndk_dir/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar" rcs "$dummy_libs/librt.a"
 
-"$cmake" -S "$xmrig_src" -B "$xmrig_build" -G Ninja \
+rm -rf "$xmrig_patched_src"
+cp -r "$xmrig_src" "$xmrig_patched_src"
+patch -p1 -N -d "$xmrig_patched_src" < "$xmrig_patch"
+rm -rf "$xmrig_build"
+
+"$cmake" -S "$xmrig_patched_src" -B "$xmrig_build" -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE="$toolchain" \
     -DANDROID_ABI=arm64-v8a \
     -DANDROID_PLATFORM=android-24 \

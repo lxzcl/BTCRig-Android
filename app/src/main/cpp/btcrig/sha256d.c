@@ -119,38 +119,6 @@ sha256d_backend_t sha256d_get_backend(void) {
     return g_backend;
 }
 
-int sha256d_parse_backend(const char *text, sha256d_backend_t *out) {
-    if (text == NULL || out == NULL) {
-        return -1;
-    }
-    if (strcmp(text, "openssl") == 0 || strcmp(text, "ossl") == 0) {
-        *out = SHA256D_BACKEND_OPENSSL;
-        return 0;
-    }
-    if (strcmp(text, "fast-c") == 0 ||
-        strcmp(text, "fastc") == 0 ||
-        strcmp(text, "portable") == 0 ||
-        strcmp(text, "c") == 0) {
-        *out = SHA256D_BACKEND_FAST_C;
-        return 0;
-    }
-    if (strcmp(text, "arm-sha2") == 0 ||
-        strcmp(text, "armv8-sha2") == 0 ||
-        strcmp(text, "sha2") == 0 ||
-        strcmp(text, "neon") == 0) {
-        *out = SHA256D_BACKEND_ARM_SHA2;
-        return 0;
-    }
-    if (strcmp(text, "x86-sha-ni") == 0 ||
-        strcmp(text, "x86-shani") == 0 ||
-        strcmp(text, "sha-ni") == 0 ||
-        strcmp(text, "shani") == 0) {
-        *out = SHA256D_BACKEND_X86_SHA_NI;
-        return 0;
-    }
-    return -1;
-}
-
 static uint32_t rotr32(uint32_t x, unsigned int n) {
     return (x >> n) | (x << (32U - n));
 }

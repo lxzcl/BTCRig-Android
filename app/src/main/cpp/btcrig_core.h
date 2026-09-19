@@ -26,7 +26,6 @@ void btcrig_core_copy_stratum_status(char *out, size_t out_size);
 void btcrig_core_copy_last_error(char *out, size_t out_size);
 void btcrig_core_copy_opencl_status(const char *config_path, char *out, size_t out_size);
 double btcrig_core_benchmark_cpu(int seconds, int threads);
-double btcrig_core_benchmark_cpu_backend(const char *backend, int seconds, int threads);
 double btcrig_core_benchmark_opencl(const char *config_path, int seconds);
 double btcrig_core_benchmark_cpu_gpu(const char *config_path, int seconds, int threads);
 void btcrig_core_benchmark_cpu_challenge(const char *seed, int seconds, int threads, double proof_difficulty, char *out, size_t out_size);

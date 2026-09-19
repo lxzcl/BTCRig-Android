@@ -4,7 +4,6 @@
     <string name="config_saved">Config saved.</string>
     <string name="config_save_failed">Config save failed: %1$s</string>
     <string name="stop_mining_before_benchmark">Stop mining before benchmark.</string>
-    <string name="configure_pool_user_first">Configure pool and user first.</string>
     <string name="enable_cpu_or_opencl_first">Enable CPU threads or OpenCL first.</string>
     <string name="settings_check">Settings check</string>
     <string name="settings_check_ok">Settings look valid.</string>
@@ -30,7 +29,6 @@
     <string name="last_error">Last error</string>
     <string name="recent_error">Recent error</string>
     <string name="no_recent_errors">No recent errors</string>
-    <string name="page_subtitle">Native CPU / OpenCL miner</string>
     <string name="settings_title">Settings</string>
     <string name="xmrig_compatibility">MoneroOcean XMRig 6.26.0 · CPU multi-algorithm · Android 7.0+ / arm64-v8a · TCP/TLS pools</string>
     <string name="xmrig_algo_label">Algorithm</string>
@@ -84,7 +82,6 @@
     <string name="leaderboard">Leaderboard</string>
     <string name="leaderboard_loading">Loading...</string>
     <string name="leaderboard_empty">No data yet. Run a benchmark, then upload this device.</string>
-    <string name="leaderboard_best">%1$s · %2$s</string>
     <string name="leaderboard_uploaded">Leaderboard: uploaded</string>
     <string name="leaderboard_rejected">Leaderboard: rejected (%1$s)</string>
     <string name="leaderboard_upload_failed">Leaderboard upload failed: %1$s</string>
@@ -162,7 +159,6 @@
     <string name="cpu_full_cores_value">CPU full cores: %1$s</string>
     <string name="benchmark_backend_value">%1$s: %2$s</string>
     <string name="testing">testing...</string>
-    <string name="opencl_label">OpenCL</string>
     <string name="opencl_diagnostics">OpenCL diagnostics</string>
     <string name="opencl_diag_disabled">GPU mining is disabled in settings.</string>
     <string name="opencl_diag_not_built">This APK was built without OpenCL support.</string>

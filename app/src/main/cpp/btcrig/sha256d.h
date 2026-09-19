@@ -39,7 +39,6 @@ int sha256d_backend_available(sha256d_backend_t backend);
 sha256d_backend_t sha256d_auto_backend(void);
 int sha256d_set_backend(sha256d_backend_t backend);
 sha256d_backend_t sha256d_get_backend(void);
-int sha256d_parse_backend(const char *text, sha256d_backend_t *out);
 sha256d_tail_words_func_t sha256d_tail_words_func(void);
 sha256d_nonce_range_func_t sha256d_nonce_range_func(void);
 

@@ -46,8 +46,6 @@ final class BtcrigNative {
 
     static native String benchmarkCpuChallenge(String seed, int seconds, int threads, double proofDifficulty);
 
-    static native double benchmarkCpuBackend(String backend, int seconds, int threads);
-
     static native double benchmarkOpencl(String configPath, int seconds);
 
     static native String benchmarkOpenclChallenge(String configPath, String seed, int seconds, double proofDifficulty);

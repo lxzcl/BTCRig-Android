@@ -884,24 +884,6 @@ void btcrig_core_benchmark_cpu_challenge(const char *seed, int seconds, int thre
     run_benchmark_challenge_miner(miner_create(threads), seed, seconds, proof_difficulty, 0.0, out, out_size);
 }
 
-double btcrig_core_benchmark_cpu_backend(const char *backend, int seconds, int threads) {
-    sha256d_backend_t requested;
-    if (backend == NULL ||
-        sha256d_parse_backend(backend, &requested) != 0 ||
-        !sha256d_backend_available(requested) ||
-        btcrig_core_is_running()) {
-        return -1.0;
-    }
-
-    sha256d_backend_t previous = sha256d_get_backend();
-    if (sha256d_set_backend(requested) != 0) {
-        return -1.0;
-    }
-    double hps = btcrig_core_benchmark_cpu(seconds, threads);
-    (void)sha256d_set_backend(previous);
-    return hps;
-}
-
 double btcrig_core_benchmark_opencl(const char *config_path, int seconds) {
 #if defined(BTC_MINER_OPENCL)
     if (btcrig_core_is_running()) {

@@ -195,7 +195,7 @@ public final class BtcrigService extends Service {
     private Notification buildNotification() {
         Intent openIntent = getPackageManager().getLaunchIntentForPackage(getPackageName());
         if (openIntent == null) {
-            openIntent = new Intent(this, MainActivity.class);
+            openIntent = new Intent(this, ModernActivity.class);
         }
         PendingIntent open = PendingIntent.getActivity(
                 this,

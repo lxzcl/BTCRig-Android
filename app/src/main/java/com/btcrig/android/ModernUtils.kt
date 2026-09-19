@@ -178,6 +178,7 @@ internal fun BtcrigConfig.Basic.copyBasic(
     xmrigThreads: Int = this.xmrigThreads,
     xmrigAlgo: String = this.xmrigAlgo,
     gpuCompanion: Boolean = this.gpuCompanion,
+    autoStart: Boolean = this.autoStart,
 ): BtcrigConfig.Basic {
     val next = BtcrigConfig.Basic()
     next.engine = if (engine == "xmrig") "xmrig" else "btcrig"
@@ -197,6 +198,7 @@ internal fun BtcrigConfig.Basic.copyBasic(
     next.xmrigThreads = xmrigThreads.coerceAtLeast(1)
     next.xmrigAlgo = if (XmrigRunner.isSupportedAlgorithm(xmrigAlgo)) xmrigAlgo else ""
     next.gpuCompanion = gpuCompanion
+    next.autoStart = autoStart
     return next
 }
 

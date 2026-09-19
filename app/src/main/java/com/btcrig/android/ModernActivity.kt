@@ -1,6 +1,7 @@
 package com.btcrig.android
 
 import android.Manifest
+import android.app.role.RoleManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Intent
@@ -47,6 +48,7 @@ class ModernActivity : ComponentActivity() {
             navigationBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
         )
         requestNotificationPermission()
+        maybeAutoStartMining()
 
         setContent {
             var ui by remember { mutableStateOf(readUi()) }
@@ -257,6 +259,7 @@ class ModernActivity : ComponentActivity() {
                     basic = basic,
                     onBasicChange = { saveBasic(it) },
                     onBatteryOptimization = { requestIgnoreBatteryOptimizations() },
+                    onSetHome = { requestHomeRole() },
                     onJson = { showJson = true },
                     onLog = {
                         logTitle = if (basic.engine == "xmrig") "xmrig.log" else "btcrig.log"
@@ -306,6 +309,32 @@ class ModernActivity : ComponentActivity() {
         ) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
         }
+    }
+
+    private fun maybeAutoStartMining() {
+        val basic = runCatching { BtcrigConfig.readBasic(this) }.getOrNull() ?: return
+        if (!basic.autoStart) return
+        if (XmrigRunner.isRunning() || BtcrigNative.isRunning() || serviceExpectedRunning()) return
+        startBtcrigService()
+    }
+
+    private fun requestHomeRole() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val manager = getSystemService(RoleManager::class.java)
+            if (manager == null || !manager.isRoleAvailable(RoleManager.ROLE_HOME)) {
+                toast(getString(R.string.set_as_home_failed, getString(R.string.unavailable)))
+                return
+            }
+            if (manager.isRoleHeld(RoleManager.ROLE_HOME)) {
+                toast(getString(R.string.set_as_home_already))
+                return
+            }
+            runCatching { startActivity(manager.createRequestRoleIntent(RoleManager.ROLE_HOME)) }
+                .onFailure { toast(getString(R.string.set_as_home_failed, it.message ?: it.javaClass.simpleName)) }
+            return
+        }
+        runCatching { startActivity(Intent(Settings.ACTION_HOME_SETTINGS)) }
+            .onFailure { toast(getString(R.string.set_as_home_failed, it.message ?: it.javaClass.simpleName)) }
     }
 
     private fun startBtcrigService(): Boolean {

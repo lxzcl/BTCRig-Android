@@ -57,6 +57,11 @@
     <string name="allow_unknown_certs">Allow unknown certificates</string>
     <string name="keep_awake">Keep awake</string>
     <string name="ignore_battery_optimizations">Ignore battery optimizations</string>
+    <string name="set_as_home">Set as Home app</string>
+    <string name="set_as_home_confirm">Home will be replaced with this app.</string>
+    <string name="set_as_home_already">This app is already the Home app.</string>
+    <string name="set_as_home_failed">Could not open Home settings: %1$s</string>
+    <string name="auto_start_mining">Start mining when the app opens</string>
     <string name="battery_optimization_not_needed">Battery optimization control is not needed on this Android version.</string>
     <string name="battery_optimization_already_ignored">Battery optimization is already ignored.</string>
     <string name="battery_optimization_open_failed">Failed to open battery settings: %1$s</string>
@@ -125,6 +130,7 @@
     <string name="xmrig_donation_min">XMRig minimum donation is 1%</string>
     <string name="edit_config_json">Edit config.json</string>
     <string name="cancel">Cancel</string>
+    <string name="confirm">OK</string>
     <string name="save">Save</string>
     <string name="close">Close</string>
     <string name="ok">ok</string>

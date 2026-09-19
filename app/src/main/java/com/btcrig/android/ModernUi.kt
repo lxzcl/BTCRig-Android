@@ -157,6 +157,7 @@ private fun PreviewScreen(page: Int) {
             basic = previewBasic(),
             onBasicChange = {},
             onBatteryOptimization = {},
+            onSetHome = {},
             onJson = {},
             onLog = {},
         )
@@ -186,6 +187,7 @@ internal fun BtcrigScreen(
     basic: BtcrigConfig.Basic,
     onBasicChange: (BtcrigConfig.Basic) -> Unit,
     onBatteryOptimization: () -> Unit,
+    onSetHome: () -> Unit,
     onJson: () -> Unit,
     onLog: () -> Unit,
 ) {
@@ -213,7 +215,7 @@ internal fun BtcrigScreen(
                                 verticalArrangement = Arrangement.spacedBy(16.dp),
                             ) {
                                 PageHeader()
-                                SettingsPage(ui, basic, settingsValidation, xmrigBenchmarkNeeded, onXmrigBenchmark, onBasicChange, onBatteryOptimization, onJson)
+                                SettingsPage(ui, basic, settingsValidation, xmrigBenchmarkNeeded, onXmrigBenchmark, onBasicChange, onBatteryOptimization, onSetHome, onJson)
                             }
                         }
                         2 -> {
@@ -606,9 +608,11 @@ private fun SettingsPage(
     onXmrigBenchmark: () -> Unit,
     onBasicChange: (BtcrigConfig.Basic) -> Unit,
     onBatteryOptimization: () -> Unit,
+    onSetHome: () -> Unit,
     onJson: () -> Unit,
 ) {
     val enabled = !ui.running && !ui.stopping
+    var showHomeDialog by remember { mutableStateOf(false) }
     SettingSection(stringResource(R.string.settings_title), compact = true) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             RankModeButton("BTCRig", basic.engine == "btcrig") { if (enabled) onBasicChange(basic.copyBasic(engine = "btcrig")) }
@@ -717,6 +721,9 @@ private fun SettingsPage(
         SettingSwitchRow(stringResource(R.string.keep_awake), basic.wakeLock, enabled) {
             onBasicChange(basic.copyBasic(wakeLock = it))
         }
+        SettingSwitchRow(stringResource(R.string.auto_start_mining), basic.autoStart, enabled) {
+            onBasicChange(basic.copyBasic(autoStart = it))
+        }
         if (!enabled) {
             Line(stringResource(R.string.stop_service_before_save))
         }
@@ -738,8 +745,25 @@ private fun SettingsPage(
     } else {
         SettingValidationCard(settingsValidation, ui.openclDiagnosis)
     }
+    RigButton(text = stringResource(R.string.set_as_home), onClick = { showHomeDialog = true })
     RigButton(text = stringResource(R.string.ignore_battery_optimizations), onClick = onBatteryOptimization)
     RigButton(text = stringResource(R.string.advanced_json), onClick = onJson, enabled = enabled)
+    if (showHomeDialog) {
+        AlertDialog(
+            onDismissRequest = { showHomeDialog = false },
+            title = { Text(stringResource(R.string.set_as_home)) },
+            text = { Text(stringResource(R.string.set_as_home_confirm)) },
+            dismissButton = {
+                TextButton(onClick = { showHomeDialog = false }) { Text(stringResource(R.string.cancel)) }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showHomeDialog = false
+                    onSetHome()
+                }) { Text(stringResource(R.string.confirm)) }
+            },
+        )
+    }
 }
 
 @Composable

@@ -57,6 +57,11 @@
     <string name="allow_unknown_certs">兼容未知证书</string>
     <string name="keep_awake">保持唤醒</string>
     <string name="ignore_battery_optimizations">忽略电池优化</string>
+    <string name="set_as_home">设置为本机桌面</string>
+    <string name="set_as_home_confirm">主页会替换成本应用。</string>
+    <string name="set_as_home_already">本应用已经是桌面。</string>
+    <string name="set_as_home_failed">打开桌面设置失败：%1$s</string>
+    <string name="auto_start_mining">打开应用开始工作</string>
     <string name="battery_optimization_not_needed">当前 Android 版本不需要电池优化控制。</string>
     <string name="battery_optimization_already_ignored">已经忽略电池优化。</string>
     <string name="battery_optimization_open_failed">打开电池设置失败：%1$s</string>
@@ -125,6 +130,7 @@
     <string name="xmrig_donation_min">XMRig下最低1%</string>
     <string name="edit_config_json">编辑 config.json</string>
     <string name="cancel">取消</string>
+    <string name="confirm">确定</string>
     <string name="save">保存</string>
     <string name="close">关闭</string>
     <string name="ok">正常</string>

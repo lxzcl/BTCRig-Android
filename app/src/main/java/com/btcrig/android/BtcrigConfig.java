@@ -38,6 +38,7 @@ final class BtcrigConfig {
         int xmrigThreads = defaultCpuThreads();
         String xmrigAlgo = "";
         boolean gpuCompanion = false;
+        boolean autoStart = false;
     }
 
     private BtcrigConfig() {
@@ -97,6 +98,7 @@ final class BtcrigConfig {
         }
         basic.certCompat = root.optBoolean("tls_compat", basic.certCompat);
         basic.wakeLock = root.optBoolean("wake_lock", basic.wakeLock);
+        basic.autoStart = root.optBoolean("auto_start", basic.autoStart);
 
         JSONObject donation = root.optJSONObject("donation");
         if (donation != null) {
@@ -210,6 +212,7 @@ final class BtcrigConfig {
         }
         root.put("donate-level", donationPercent);
         root.put("wake_lock", basic.wakeLock);
+        root.put("auto_start", basic.autoStart);
 
         JSONObject xmrig = root.optJSONObject("xmrig");
         if (xmrig == null) {

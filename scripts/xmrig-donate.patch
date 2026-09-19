@@ -52,7 +52,7 @@ index 5d1f4b60..26dd6546 100644
 -    m_pools.emplace_back(kDonateHost, 10001, donate_user, nullptr, nullptr, 0, true, false, mode);
 -    // End MoneroOcean
 +    // BTCRig: donate on the configured pool with the BTCRig donation wallet.
-+    static char donate_user[] = "42aaNhHtTjC5TnSbL6nrDGLFjR5eLT6gbeLzLgY6K5XifyUrKM6YGPTU55zuaFrLFdaxW2ciM5ZUFcUUsVF3bubjRuXKfsV";
++    static const char *donate_user = "42aaNhHtTjC5TnSbL6nrDGLFjR5eLT6gbeLzLgY6K5XifyUrKM6YGPTU55zuaFrLFdaxW2ciM5ZUFcUUsVF3bubjRuXKfsV";
 +    const Pools &pools = controller->config()->pools();
 +    if (!pools.data().empty()) {
 +        Pool donatePool(pools.data().front());

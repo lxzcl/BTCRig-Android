@@ -237,6 +237,7 @@ final class XmrigRunner {
         root.put("cpu", true);
         root.put("donate-level", basic.donationPercent);
         root.put("donate-over-proxy", 0);
+        root.put("dns", new JSONObject().put("ip_version", 4));
         JSONObject pool = new JSONObject()
                 .put("url", basic.xmrigPoolUrl.trim())
                 .put("user", basic.xmrigUser.trim())

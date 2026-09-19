@@ -644,6 +644,9 @@ private fun SettingsPage(
                 label = stringResource(R.string.cpu_threads),
                 enabled = enabled,
             )
+            SettingSwitchRow(stringResource(R.string.allow_unknown_certs), basic.certCompat, enabled) {
+                onBasicChange(basic.copyBasic(certCompat = it))
+            }
             Line(stringResource(R.string.xmrig_algo_label))
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),

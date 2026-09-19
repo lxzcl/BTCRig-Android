@@ -8,4 +8,4 @@ BTCRig Android bundles the following software:
 
 The exact source revisions and Android build instructions are recorded by `.gitmodules`, the submodule commits, and `scripts/build-xmrig-android.sh`.
 
-Local modification: `scripts/xmrig-donate.patch` replaces the built-in XMRig/MoneroOcean developer donation with the BTCRig donation: the donation strategy mines on the configured pool with the BTCRig donation wallet, at a minimum level of 1%. The build script applies this patch to a copy of the submodule source before compiling.
+Local modifications: `scripts/xmrig-donate.patch` replaces the built-in XMRig/MoneroOcean developer donation with the BTCRig donation: the donation strategy mines on the configured pool with the BTCRig donation wallet, at a minimum level of 1%. `scripts/xmrig-tls-compat.patch` adds a per-pool `tls-compat` flag: when disabled, the TLS client verifies the certificate chain against the Android system CA store and checks the host name. The build script applies these patches to a copy of the submodule source before compiling.

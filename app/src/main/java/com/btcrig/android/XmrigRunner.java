@@ -67,9 +67,8 @@ final class XmrigRunner {
             boolean calibrated = !needsBenchmark(context, basic);
             String fixed = basic.xmrigAlgo == null ? "" : basic.xmrigAlgo.trim();
             boolean fixedAlgorithm = isSupportedAlgorithm(fixed);
-            List<String> command = command(binary(context), prepareConfig(configFile(context), basic, calibrated, fixedAlgorithm), basic, logFile);
-            if (fixedAlgorithm) command.add("--algo=" + fixed);
-            else if (!calibrated) command.add("--algo=rx/0");
+            String algo = fixedAlgorithm ? fixed : (calibrated ? "" : "rx/0");
+            List<String> command = command(binary(context), prepareConfig(configFile(context), basic, calibrated, fixedAlgorithm, algo), basic, logFile);
             new FileOutputStream(logFile, false).close();
             process = new ProcessBuilder(command)
                     .directory(context.getFilesDir())
@@ -91,7 +90,7 @@ final class XmrigRunner {
         File benchmarkLog = new File(context.getFilesDir(), "xmrig-benchmark.log");
         Process benchmark = null;
         try {
-            File config = prepareConfig(benchmarkConfigFile(context), basic, false, false);
+            File config = prepareConfig(benchmarkConfigFile(context), basic, false, false, "");
             List<String> command = command(binary(context), config, basic, benchmarkLog);
             command.add("--rebench-algo");
             command.add("--bench-algo-time=3");
@@ -111,7 +110,9 @@ final class XmrigRunner {
                 if (text.contains("ALGO PERFORMANCE CALIBRATION COMPLETE")) {
                     JSONObject perf = parseBenchmark(text);
                     if (perf.length() == 0 || perf.optDouble("rx/0", -1.0) <= 0.0) return false;
-                    savePerformance(prepareConfig(configFile(context), basic, true, isSupportedAlgorithm(basic.xmrigAlgo)), perf);
+                    String fixed = basic.xmrigAlgo == null ? "" : basic.xmrigAlgo.trim();
+                    boolean fixedAlgorithm = isSupportedAlgorithm(fixed);
+                    savePerformance(prepareConfig(configFile(context), basic, true, fixedAlgorithm, fixedAlgorithm ? fixed : ""), perf);
                     markBenchmarkComplete(context, basic);
                     progress.accept("");
                     return true;
@@ -218,9 +219,6 @@ final class XmrigRunner {
         List<String> command = new ArrayList<>();
         command.add(binary.getAbsolutePath());
         command.add("--config=" + config.getAbsolutePath());
-        command.add("--url=" + basic.xmrigPoolUrl.trim());
-        command.add("--user=" + basic.xmrigUser.trim());
-        command.add("--pass=" + (basic.xmrigPass.isEmpty() ? "x" : basic.xmrigPass));
         command.add("--threads=" + Math.max(1, basic.xmrigThreads));
         command.add("--donate-level=" + basic.donationPercent);
         command.add("--print-time=5");
@@ -230,7 +228,7 @@ final class XmrigRunner {
         return command;
     }
 
-    private static File prepareConfig(File file, BtcrigConfig.Basic basic, boolean calibrated, boolean fixedAlgorithm) throws Exception {
+    private static File prepareConfig(File file, BtcrigConfig.Basic basic, boolean calibrated, boolean fixedAlgorithm, String algo) throws Exception {
         JSONObject root = readJson(file);
         root.put("autosave", false);
         root.put("btcrig-calibrated", calibrated);
@@ -239,11 +237,16 @@ final class XmrigRunner {
         root.put("cpu", true);
         root.put("donate-level", basic.donationPercent);
         root.put("donate-over-proxy", 0);
-        root.put("pools", new JSONArray().put(new JSONObject()
+        JSONObject pool = new JSONObject()
                 .put("url", basic.xmrigPoolUrl.trim())
                 .put("user", basic.xmrigUser.trim())
                 .put("pass", basic.xmrigPass.isEmpty() ? "x" : basic.xmrigPass)
-                .put("keepalive", true)));
+                .put("keepalive", true)
+                .put("tls-compat", basic.certCompat);
+        if (!algo.isEmpty()) {
+            pool.put("algo", algo);
+        }
+        root.put("pools", new JSONArray().put(pool));
         if (fixedAlgorithm) {
             root.remove("algo-perf");
         } else if (!calibrated) {

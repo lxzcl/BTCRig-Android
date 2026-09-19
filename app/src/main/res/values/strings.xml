@@ -16,6 +16,7 @@
     <string name="validation_pool_port">Pool URL needs a valid port.</string>
     <string name="validation_user_required">Wallet / user is required.</string>
     <string name="validation_threads_range">CPU threads must be 0–%1$d.</string>
+    <string name="validation_xmrig_threads_range">XMRig CPU threads must be 1–%1$d.</string>
     <string name="validation_difficulty">Difficulty must be 0 or higher.</string>
     <string name="tab_home">Home</string>
     <string name="tab_settings">Settings</string>
@@ -26,11 +27,15 @@
     <string name="status_stopped">Stopped</string>
     <string name="status_service_missing">Restart needed</string>
     <string name="pool_label">Pool</string>
+    <string name="mining_engine">Engine</string>
     <string name="last_error">Last error</string>
     <string name="recent_error">Recent error</string>
     <string name="no_recent_errors">No recent errors</string>
     <string name="page_subtitle">Native CPU / OpenCL miner</string>
     <string name="settings_title">Settings</string>
+    <string name="xmrig_compatibility">XMRig 6.24.0 · RandomX CPU only · Android 7.0+ / arm64-v8a · TCP pools</string>
+    <string name="xmrig_unavailable">XMRig requires Android 7.0+ on arm64-v8a.</string>
+    <string name="xmrig_tcp_only">This XMRig preview currently supports stratum+tcp:// pools.</string>
     <string name="pool_url">Pool URL</string>
     <string name="user_worker">User / worker</string>
     <string name="password">Password</string>
@@ -124,6 +129,9 @@
     <string name="config_summary_unavailable">Config summary unavailable</string>
     <string name="cpu_threads_value">%1$d threads</string>
     <string name="cpu_opencl_summary">CPU: %1$s / OpenCL: %2$s</string>
+    <string name="xmrig_config_summary">XMRig RandomX: %1$d CPU threads</string>
+    <string name="xmrig_status_running">XMRig RandomX: running</string>
+    <string name="xmrig_cpu_only">XMRig RandomX · CPU only</string>
     <string name="workers_value">Workers: %1$d</string>
     <string name="workers_empty">Workers: --</string>
     <string name="total_value">Total: %1$d</string>

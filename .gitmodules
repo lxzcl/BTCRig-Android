@@ -1,0 +1,6 @@
+[submodule "app/src/main/cpp/third_party/xmrig"]
+	path = app/src/main/cpp/third_party/xmrig
+	url = https://github.com/xmrig/xmrig.git
+[submodule "app/src/main/cpp/third_party/libuv"]
+	path = app/src/main/cpp/third_party/libuv
+	url = https://github.com/libuv/libuv.git

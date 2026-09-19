@@ -340,7 +340,7 @@ private fun HomePage(
             EnterUp(delayMillis = 320) {
                 Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     SpecRow("CPU", ui.cpuSummary)
-                    SpecRow("GPU", ui.gpuSummary)
+                    SpecRow(if (ui.engine == "xmrig") stringResource(R.string.mining_engine) else "GPU", ui.gpuSummary)
                     SpecRow(stringResource(R.string.pool_label), ui.pool)
                 }
             }
@@ -583,43 +583,75 @@ private fun SettingsPage(
 ) {
     val enabled = !ui.running && !ui.stopping
     SettingSection(stringResource(R.string.settings_title), compact = true) {
-        SettingField(
-            value = basic.poolUrl,
-            onValueChange = { onBasicChange(basic.copyBasic(poolUrl = it)) },
-            label = stringResource(R.string.pool_url),
-            enabled = enabled,
-        )
-        SettingField(
-            value = basic.user,
-            onValueChange = { onBasicChange(basic.copyBasic(user = it)) },
-            label = stringResource(R.string.user_worker),
-            enabled = enabled,
-        )
-        SettingField(
-            value = basic.pass,
-            onValueChange = { onBasicChange(basic.copyBasic(pass = it)) },
-            label = stringResource(R.string.password),
-            enabled = enabled,
-        )
-        SettingField(
-            value = basic.cpuThreads.toString(),
-            onValueChange = { onBasicChange(basic.copyBasic(cpuThreads = it.filter(Char::isDigit).toIntOrNull() ?: 0)) },
-            label = stringResource(R.string.cpu_threads),
-            enabled = enabled,
-            helper = stringResource(R.string.cpu_threads_helper),
-        )
-        SettingField(
-            value = basic.difficulty.toString(),
-            onValueChange = { onBasicChange(basic.copyBasic(difficulty = it.toDoubleOrNull() ?: 0.0)) },
-            label = stringResource(R.string.difficulty),
-            enabled = enabled,
-            helper = stringResource(R.string.difficulty_helper),
-        )
-        SettingSwitchRow(stringResource(R.string.enable_opencl_gpu), basic.openclEnabled, enabled) {
-            onBasicChange(basic.copyBasic(openclEnabled = it))
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            RankModeButton("BTCRig", basic.engine == "btcrig") { if (enabled) onBasicChange(basic.copyBasic(engine = "btcrig")) }
+            RankModeButton("XMRig", basic.engine == "xmrig") { if (enabled) onBasicChange(basic.copyBasic(engine = "xmrig")) }
         }
-        SettingSwitchRow(stringResource(R.string.allow_unknown_certs), basic.certCompat, enabled) {
-            onBasicChange(basic.copyBasic(certCompat = it))
+        if (basic.engine == "xmrig") {
+            Line(stringResource(R.string.xmrig_compatibility))
+            SettingField(
+                value = basic.xmrigPoolUrl,
+                onValueChange = { onBasicChange(basic.copyBasic(xmrigPoolUrl = it)) },
+                label = stringResource(R.string.pool_url),
+                enabled = enabled,
+            )
+            SettingField(
+                value = basic.xmrigUser,
+                onValueChange = { onBasicChange(basic.copyBasic(xmrigUser = it)) },
+                label = stringResource(R.string.user_worker),
+                enabled = enabled,
+            )
+            SettingField(
+                value = basic.xmrigPass,
+                onValueChange = { onBasicChange(basic.copyBasic(xmrigPass = it)) },
+                label = stringResource(R.string.password),
+                enabled = enabled,
+            )
+            SettingField(
+                value = basic.xmrigThreads.toString(),
+                onValueChange = { onBasicChange(basic.copyBasic(xmrigThreads = it.filter(Char::isDigit).toIntOrNull() ?: 1)) },
+                label = stringResource(R.string.cpu_threads),
+                enabled = enabled,
+            )
+        } else {
+            SettingField(
+                value = basic.poolUrl,
+                onValueChange = { onBasicChange(basic.copyBasic(poolUrl = it)) },
+                label = stringResource(R.string.pool_url),
+                enabled = enabled,
+            )
+            SettingField(
+                value = basic.user,
+                onValueChange = { onBasicChange(basic.copyBasic(user = it)) },
+                label = stringResource(R.string.user_worker),
+                enabled = enabled,
+            )
+            SettingField(
+                value = basic.pass,
+                onValueChange = { onBasicChange(basic.copyBasic(pass = it)) },
+                label = stringResource(R.string.password),
+                enabled = enabled,
+            )
+            SettingField(
+                value = basic.cpuThreads.toString(),
+                onValueChange = { onBasicChange(basic.copyBasic(cpuThreads = it.filter(Char::isDigit).toIntOrNull() ?: 0)) },
+                label = stringResource(R.string.cpu_threads),
+                enabled = enabled,
+                helper = stringResource(R.string.cpu_threads_helper),
+            )
+            SettingField(
+                value = basic.difficulty.toString(),
+                onValueChange = { onBasicChange(basic.copyBasic(difficulty = it.toDoubleOrNull() ?: 0.0)) },
+                label = stringResource(R.string.difficulty),
+                enabled = enabled,
+                helper = stringResource(R.string.difficulty_helper),
+            )
+            SettingSwitchRow(stringResource(R.string.enable_opencl_gpu), basic.openclEnabled, enabled) {
+                onBasicChange(basic.copyBasic(openclEnabled = it))
+            }
+            SettingSwitchRow(stringResource(R.string.allow_unknown_certs), basic.certCompat, enabled) {
+                onBasicChange(basic.copyBasic(certCompat = it))
+            }
         }
         SettingSwitchRow(stringResource(R.string.keep_awake), basic.wakeLock, enabled) {
             onBasicChange(basic.copyBasic(wakeLock = it))
@@ -628,7 +660,13 @@ private fun SettingsPage(
             Line(stringResource(R.string.stop_service_before_save))
         }
     }
-    SettingValidationCard(settingsValidation, ui.openclDiagnosis)
+    if (basic.engine == "xmrig") {
+        SettingSection(stringResource(R.string.settings_check), compact = true) {
+            ValidationLine(settingsValidation.ifBlank { stringResource(R.string.settings_check_ok) }, settingsValidation.isNotBlank())
+        }
+    } else {
+        SettingValidationCard(settingsValidation, ui.openclDiagnosis)
+    }
     RigButton(text = stringResource(R.string.ignore_battery_optimizations), onClick = onBatteryOptimization)
     RigButton(text = stringResource(R.string.advanced_json), onClick = onJson, enabled = enabled)
 }
@@ -746,12 +784,12 @@ private fun InfoPage(
         RigButton(
             text = if (benchmarking) stringResource(R.string.benchmarking) else stringResource(R.string.benchmark),
             onClick = onBenchmark,
-            enabled = !benchmarking && !uploadingBenchmark && !ui.running && !ui.stopping
+            enabled = ui.engine == "btcrig" && !benchmarking && !uploadingBenchmark && !ui.running && !ui.stopping
         )
         RigButton(
             text = if (uploadingBenchmark) stringResource(R.string.uploading_score) else stringResource(R.string.upload_score),
             onClick = onUploadBenchmark,
-            enabled = !benchmarking && !uploadingBenchmark && !ui.running && !ui.stopping
+            enabled = ui.engine == "btcrig" && !benchmarking && !uploadingBenchmark && !ui.running && !ui.stopping
         )
     }
     BenchmarkBox(benchmark)
@@ -763,7 +801,9 @@ private fun InfoPage(
         Line("${stringResource(R.string.self_test)}: ${if (ui.selfTest) stringResource(R.string.ok) else stringResource(R.string.failed)}")
         Line(stringResource(R.string.config_log_value, ui.configPath, ui.logPath))
     }
-    OpenclDiagnosticCard(ui.openclDiagnosis, ui.opencl)
+    if (ui.engine == "btcrig") {
+        OpenclDiagnosticCard(ui.openclDiagnosis, ui.opencl)
+    }
     DonationCard(
         percent = basic.donationPercent,
         enabled = !ui.running && !ui.stopping,

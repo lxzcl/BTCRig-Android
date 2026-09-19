@@ -7,4 +7,4 @@ BTCRig Android bundles the following software:
 
 The exact source revisions and Android build instructions are recorded by `.gitmodules`, the submodule commits, and `scripts/build-xmrig-android.sh`.
 
-Local modification: `scripts/xmrig-disable-donate.patch` disables the built-in XMRig/MoneroOcean developer donation path (`Pools::load` forces a 0% donate level). The build script applies this patch to a copy of the submodule source before compiling.
+Local modification: `scripts/xmrig-donate.patch` replaces the built-in XMRig/MoneroOcean developer donation with the BTCRig donation: the donation strategy mines on the configured pool with the BTCRig donation wallet, at a minimum level of 1%. The build script applies this patch to a copy of the submodule source before compiling.

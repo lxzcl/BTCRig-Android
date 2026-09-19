@@ -238,6 +238,7 @@ final class XmrigRunner {
         root.put("bench-algo-time", 3);
         root.put("cpu", true);
         root.put("donate-level", basic.donationPercent);
+        root.put("donate-over-proxy", 0);
         root.put("pools", new JSONArray().put(new JSONObject()
                 .put("url", basic.xmrigPoolUrl.trim())
                 .put("user", basic.xmrigUser.trim())

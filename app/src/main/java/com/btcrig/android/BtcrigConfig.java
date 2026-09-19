@@ -103,6 +103,9 @@ final class BtcrigConfig {
         }
         basic.donationPercent = root.optInt("donation_percent", basic.donationPercent);
         basic.donationPercent = sanitizeDonationPercent(basic.donationPercent);
+        if ("xmrig".equals(basic.engine) && basic.donationPercent < 1) {
+            basic.donationPercent = 1;
+        }
 
         JSONObject xmrig = root.optJSONObject("xmrig");
         if (xmrig != null) {
@@ -185,6 +188,9 @@ final class BtcrigConfig {
             root.put("donation", donation);
         }
         int donationPercent = sanitizeDonationPercent(basic.donationPercent);
+        if (xmrigSelected && donationPercent < 1) {
+            donationPercent = 1;
+        }
         donation.put("percent", donationPercent);
         if (!donation.has("address") && !donation.has("user") && !donation.has("wallet")) {
             donation.put("address", DEFAULT_USER);

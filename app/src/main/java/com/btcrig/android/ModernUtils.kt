@@ -189,6 +189,7 @@ internal fun BtcrigConfig.Basic.copyBasic(
     next.certCompat = certCompat
     next.wakeLock = wakeLock
     next.donationPercent = DONATION_LEVELS.find { it == donationPercent } ?: 1
+    if (next.engine == "xmrig" && next.donationPercent < 1) next.donationPercent = 1
     next.xmrigPoolUrl = xmrigPoolUrl
     next.xmrigUser = xmrigUser
     next.xmrigPass = xmrigPass

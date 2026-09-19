@@ -120,6 +120,7 @@
     <string name="self_test">Self-test</string>
     <string name="support_author">Support author</string>
     <string name="donation_ratio">Donation ratio</string>
+    <string name="xmrig_donation_min">XMRig minimum donation is 1%</string>
     <string name="edit_config_json">Edit config.json</string>
     <string name="cancel">Cancel</string>
     <string name="save">Save</string>

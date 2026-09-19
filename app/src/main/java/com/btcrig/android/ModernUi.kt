@@ -1,5 +1,6 @@
 package com.btcrig.android
 
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.RepeatMode
@@ -63,6 +64,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
@@ -856,6 +858,7 @@ private fun InfoPage(
     }
     DonationCard(
         percent = basic.donationPercent,
+        minPercent = if (basic.engine == "xmrig") 1 else 0,
         enabled = !ui.running && !ui.stopping,
         onChange = { onBasicChange(basic.copyBasic(donationPercent = it)) },
     )
@@ -1071,8 +1074,10 @@ private fun updateText(update: UpdateState): String = when {
 }
 
 @Composable
-private fun DonationCard(percent: Int, enabled: Boolean, onChange: (Int) -> Unit) {
-    val index = DONATION_LEVELS.indexOf(percent).takeIf { it >= 0 } ?: DONATION_LEVELS.indexOf(1)
+private fun DonationCard(percent: Int, minPercent: Int, enabled: Boolean, onChange: (Int) -> Unit) {
+    val context = LocalContext.current
+    val minIndex = DONATION_LEVELS.indexOfFirst { it >= minPercent }.coerceAtLeast(0)
+    val index = DONATION_LEVELS.indexOf(percent).takeIf { it >= minIndex } ?: minIndex
     SettingSection(stringResource(R.string.support_author), compact = true) {
         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.donation_ratio), modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.secondary, fontSize = 15.sp)
@@ -1080,7 +1085,14 @@ private fun DonationCard(percent: Int, enabled: Boolean, onChange: (Int) -> Unit
         }
         Slider(
             value = index.toFloat(),
-            onValueChange = { onChange(DONATION_LEVELS[it.toInt().coerceIn(0, DONATION_LEVELS.lastIndex)]) },
+            onValueChange = { raw ->
+                val level = DONATION_LEVELS[raw.toInt().coerceIn(0, DONATION_LEVELS.lastIndex)]
+                if (level < minPercent) {
+                    Toast.makeText(context, context.getString(R.string.xmrig_donation_min), Toast.LENGTH_SHORT).show()
+                } else {
+                    onChange(level)
+                }
+            },
             enabled = enabled,
             modifier = Modifier.fillMaxWidth().height(32.dp),
             valueRange = 0f..DONATION_LEVELS.lastIndex.toFloat(),

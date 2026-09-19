@@ -94,7 +94,7 @@ if (!androidSdkDir) {
 }
 def buildXmrigArm64 = tasks.register("buildXmrigArm64", Exec) {
     inputs.file(rootProject.file("scripts/build-xmrig-android.sh"))
-    inputs.file(rootProject.file("scripts/xmrig-disable-donate.patch"))
+    inputs.file(rootProject.file("scripts/xmrig-donate.patch"))
     inputs.dir(file("src/main/cpp/third_party/xmrig"))
     inputs.dir(file("src/main/cpp/third_party/libuv"))
     outputs.file(xmrigOutput.map { it.file("arm64-v8a/libxmrig.so") })

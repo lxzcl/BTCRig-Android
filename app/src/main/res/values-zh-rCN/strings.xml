@@ -120,6 +120,7 @@
     <string name="self_test">自检</string>
     <string name="support_author">支持作者</string>
     <string name="donation_ratio">捐赠比例</string>
+    <string name="xmrig_donation_min">XMRig下最低1%</string>
     <string name="edit_config_json">编辑 config.json</string>
     <string name="cancel">取消</string>
     <string name="save">保存</string>

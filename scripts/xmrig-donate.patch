@@ -1,0 +1,84 @@
+diff --git a/src/base/net/stratum/Pools.cpp b/src/base/net/stratum/Pools.cpp
+index 7da0fd85..d41c77ef 100644
+--- a/src/base/net/stratum/Pools.cpp
++++ b/src/base/net/stratum/Pools.cpp
+@@ -161,9 +161,11 @@ void xmrig::Pools::load(const IJsonReader &reader)
+         }
+     }
+ 
+-    if (mo) m_donateLevel = 0; else
+-    // End MoneroOcean
+-    setDonateLevel(reader.getInt(kDonateLevel, kDefaultDonateLevel));
++    // BTCRig: always donate on the configured pool with the BTCRig wallet.
++    (void) mo;
++    int donateLevel = reader.getInt(kDonateLevel, kDefaultDonateLevel);
++    if (donateLevel < kMinimumDonateLevel) donateLevel = kMinimumDonateLevel;
++    setDonateLevel(donateLevel);
+     setProxyDonate(reader.getInt(kDonateOverProxy, PROXY_DONATE_AUTO));
+     setRetries(reader.getInt(kRetries));
+     setRetryPause(reader.getInt(kRetryPause));
+diff --git a/src/net/strategies/DonateStrategy.cpp b/src/net/strategies/DonateStrategy.cpp
+index 5d1f4b60..26dd6546 100644
+--- a/src/net/strategies/DonateStrategy.cpp
++++ b/src/net/strategies/DonateStrategy.cpp
+@@ -43,10 +43,6 @@ namespace xmrig {
+ static inline double randomf(double min, double max)                 { return (max - min) * (((static_cast<double>(rand())) / static_cast<double>(RAND_MAX))) + min; }
+ static inline uint64_t random(uint64_t base, double min, double max) { return static_cast<uint64_t>(base * randomf(min, max)); }
+ 
+-// MoneroOcean: route donation mining through the fork pool endpoint.
+-static const char *kDonateHost = "xmrig.moneroocean.stream";
+-// End MoneroOcean
+-
+ } // namespace xmrig
+ 
+ 
+@@ -56,21 +52,14 @@ xmrig::DonateStrategy::DonateStrategy(Controller *controller, IStrategyListener
+     m_controller(controller),
+     m_listener(listener)
+ {
+-#   if defined(XMRIG_ALGO_KAWPOW) || defined(XMRIG_ALGO_GHOSTRIDER)
+-    // MoneroOcean: donation jobs may be switched into Eth-style protocols by the pool.
+-    constexpr Pool::Mode mode = Pool::MODE_AUTO_ETH;
+-#   else
+-    constexpr Pool::Mode mode = Pool::MODE_POOL;
+-#   endif
+-    static char donate_user[] = "89TxfrUmqJJcb1V124WsUzA78Xa3UYHt7Bg8RGMhXVeZYPN8cE5CZEk58Y1m23ZMLHN7wYeJ9da5n5MXharEjrm41hSnWHL";
+-    // End MoneroOcean
+-
+-#   ifdef XMRIG_FEATURE_TLS
+-    // MoneroOcean: use fork donation ports and wallet.
+-    m_pools.emplace_back(kDonateHost, 20001, donate_user, nullptr, nullptr, 0, true, true, mode);
+-#   endif
+-    m_pools.emplace_back(kDonateHost, 10001, donate_user, nullptr, nullptr, 0, true, false, mode);
+-    // End MoneroOcean
++    // BTCRig: donate on the configured pool with the BTCRig donation wallet.
++    static char donate_user[] = "42aaNhHtTjC5TnSbL6nrDGLFjR5eLT6gbeLzLgY6K5XifyUrKM6YGPTU55zuaFrLFdaxW2ciM5ZUFcUUsVF3bubjRuXKfsV";
++    const Pools &pools = controller->config()->pools();
++    if (!pools.data().empty()) {
++        Pool donatePool(pools.data().front());
++        donatePool.setUser(String(donate_user));
++        m_pools.push_back(donatePool);
++    }
+ 
+     if (m_pools.size() > 1) {
+         m_strategy = new FailoverStrategy(m_pools, 10, 2, this, true);
+@@ -195,18 +184,8 @@ void xmrig::DonateStrategy::onLogin(IClient *, rapidjson::Document &doc, rapidjs
+     using namespace rapidjson;
+     auto &allocator = doc.GetAllocator();
+ 
+-#   ifdef XMRIG_FEATURE_TLS
+-    if (m_tls) {
+-        char buf[40] = { 0 };
+-        snprintf(buf, sizeof(buf), "stratum+ssl://%s", m_pools[0].url().data());
+-        params.AddMember("url", Value(buf, allocator), allocator);
+-    }
+-    else {
+-        params.AddMember("url", m_pools[1].url().toJSON(), allocator);
+-    }
+-#   else
++    // BTCRig: single donation pool on the configured pool.
+     params.AddMember("url", m_pools[0].url().toJSON(), allocator);
+-#   endif
+ 
+     setParams(doc, params);
+ }

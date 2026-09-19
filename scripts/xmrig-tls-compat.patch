@@ -1,94 +1,23 @@
-diff --git a/src/base/net/stratum/Pool.cpp b/src/base/net/stratum/Pool.cpp
-index e0080836..309e076f 100644
---- a/src/base/net/stratum/Pool.cpp
-+++ b/src/base/net/stratum/Pool.cpp
-@@ -77,6 +77,7 @@ const char *Pool::kSelfSelect             = "self-select";
- const char *Pool::kSOCKS5                 = "socks5";
- const char *Pool::kSubmitToOrigin         = "submit-to-origin";
- const char *Pool::kTls                    = "tls";
-+const char *Pool::kTlsCompat              = "tls-compat";
- const char *Pool::kSni                    = "sni";
- const char *Pool::kUrl                    = "url";
- const char *Pool::kUser                   = "user";
-@@ -139,6 +140,7 @@ xmrig::Pool::Pool(const rapidjson::Value &object) :
-     m_flags.set(FLAG_NICEHASH, Json::getBool(object, kNicehash) || m_url.host().contains(kNicehashHost));
-     m_flags.set(FLAG_TLS,      Json::getBool(object, kTls) || m_url.isTLS());
-     m_flags.set(FLAG_SNI,      Json::getBool(object, kSni));
-+    m_tlsCompat = Json::getBool(object, kTlsCompat, true);
+diff --git a/src/base/net/stratum/Url.cpp b/src/base/net/stratum/Url.cpp
+index 7904a445..d37adf08 100644
+--- a/src/base/net/stratum/Url.cpp
++++ b/src/base/net/stratum/Url.cpp
+@@ -33,6 +33,7 @@
+ namespace xmrig {
  
-     setKeepAlive(Json::getValue(object, kKeepalive));
+ static const char kStratumTcp[]            = "stratum+tcp://";
++static const char kStratumTls[]            = "stratum+tls://";
+ static const char kStratumSsl[]            = "stratum+ssl://";
+ static const char kSOCKS5[]                = "socks5://";
  
-diff --git a/src/base/net/stratum/Pool.h b/src/base/net/stratum/Pool.h
-index e3b4b0ab..1a78cd63 100644
---- a/src/base/net/stratum/Pool.h
-+++ b/src/base/net/stratum/Pool.h
-@@ -74,6 +74,7 @@ public:
-     static const char *kSOCKS5;
-     static const char *kSubmitToOrigin;
-     static const char *kTls;
-+    static const char *kTlsCompat;
-     static const char *kSni;
-     static const char *kUrl;
-     static const char *kUser;
-@@ -100,6 +101,7 @@ public:
- 
-     inline bool isNicehash() const                      { return m_flags.test(FLAG_NICEHASH); }
-     inline bool isTLS() const                           { return m_flags.test(FLAG_TLS) || m_url.isTLS(); }
-+    inline bool isTlsCompat() const                     { return m_tlsCompat; }
-     inline bool isSNI() const                           { return m_flags.test(FLAG_SNI); }
-     inline bool isValid() const                         { return m_url.isValid(); }
-     inline const Algorithm &algorithm() const           { return m_algorithm; }
-@@ -155,6 +157,7 @@ private:
- 
-     Algorithm m_algorithm;
-     bool m_submitToOrigin           = false;
-+    bool m_tlsCompat                = true;
-     Coin m_coin;
-     int m_keepAlive                 = 0;
-     Mode m_mode                     = MODE_POOL;
-diff --git a/src/base/net/stratum/Tls.cpp b/src/base/net/stratum/Tls.cpp
-index 2a1ad1ee..7c2c0931 100644
---- a/src/base/net/stratum/Tls.cpp
-+++ b/src/base/net/stratum/Tls.cpp
-@@ -45,6 +45,13 @@ xmrig::Client::Tls::Tls(Client *client) :
-     m_write = BIO_new(BIO_s_mem());
-     m_read  = BIO_new(BIO_s_mem());
-     SSL_CTX_set_options(m_ctx, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
-+
-+    // BTCRig: verify the certificate chain and hostname unless tls-compat
-+    // is enabled for the pool (default keeps the upstream behavior).
-+    if (!m_client->m_pool.isTlsCompat()) {
-+        SSL_CTX_set_verify(m_ctx, SSL_VERIFY_PEER, nullptr);
-+        SSL_CTX_load_verify_locations(m_ctx, nullptr, "/system/etc/security/cacerts");
-+    }
- }
- 
- 
-@@ -73,6 +80,11 @@ bool xmrig::Client::Tls::handshake(const char* servername)
-         SSL_set_tlsext_host_name(m_ssl, servername);
-     }
- 
-+    // BTCRig: enforce the certificate host name in strict mode.
-+    if (!m_client->m_pool.isTlsCompat() && servername) {
-+        SSL_set1_host(m_ssl, servername);
-+    }
-+
-     SSL_set_connect_state(m_ssl);
-     SSL_set_bio(m_ssl, m_read, m_write);
-     SSL_do_handshake(m_ssl);
-@@ -122,9 +134,13 @@ void xmrig::Client::Tls::read(const char *data, size_t size)
-             X509_free(cert);
-             m_ready = true;
-             m_client->login();
--      }
-+        } else {
-+            // BTCRig: fail fast instead of waiting on a broken handshake.
-+            LOG_ERR("[%s] TLS handshake failed", m_client->url());
-+            m_client->close();
+@@ -86,6 +87,10 @@ bool xmrig::Url::parse(const char *url)
+             m_scheme = STRATUM;
+             m_tls    = false;
+         }
++        else if (strncasecmp(url, kStratumTls, sizeof(kStratumTls) - 1) == 0) {
++            m_scheme = STRATUM;
++            m_tls    = true;
 +        }
- 
--      return;
-+        return;
-     }
- 
-     static char buf[16384]{};
+         else if (strncasecmp(url, kStratumSsl, sizeof(kStratumSsl) - 1) == 0) {
+             m_scheme = STRATUM;
+             m_tls    = true;

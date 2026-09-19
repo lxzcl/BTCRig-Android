@@ -49,6 +49,7 @@ public final class BtcrigService extends Service {
             return START_NOT_STICKY;
         }
         boolean xmrig = "xmrig".equals(basic.engine);
+        XmrigRunner.cleanupStaleProcess();
         boolean started;
         if (xmrig) {
             started = XmrigRunner.start(this, basic);

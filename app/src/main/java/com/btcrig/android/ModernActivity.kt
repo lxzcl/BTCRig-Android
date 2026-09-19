@@ -49,6 +49,7 @@ class ModernActivity : ComponentActivity() {
         )
         requestNotificationPermission()
         maybeAutoStartMining()
+        runCatching { XmrigRunner.cleanupStaleProcess() }
 
         setContent {
             var ui by remember { mutableStateOf(readUi()) }

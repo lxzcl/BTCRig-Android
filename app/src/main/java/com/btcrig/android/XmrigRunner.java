@@ -35,6 +35,7 @@ final class XmrigRunner {
     private static File logFile;
     private static String pool = "";
     private static volatile String lastError = "";
+    private static volatile boolean benchmarking;
     private static int threads;
 
     private XmrigRunner() {}
@@ -53,6 +54,7 @@ final class XmrigRunner {
 
     static synchronized boolean start(Context context, BtcrigConfig.Basic basic) {
         if (isRunning()) return true;
+        cleanupStaleProcess();
         if (!isAvailable(context)) {
             lastError = "XMRig requires Android 7.0+ on arm64-v8a";
             return false;
@@ -85,10 +87,28 @@ final class XmrigRunner {
         }
     }
 
+    static void cleanupStaleProcess() {
+        if (isRunning() || benchmarking) return;
+        File[] entries = new File("/proc").listFiles();
+        if (entries == null) return;
+        int self = android.os.Process.myPid();
+        for (File entry : entries) {
+            String name = entry.getName();
+            if (!name.matches("\\d+")) continue;
+            int pid = Integer.parseInt(name);
+            if (pid == self) continue;
+            String cmdline = readFile(new File(entry, "cmdline"), 256).replace('\0', ' ').trim();
+            if (cmdline.contains("libxmrig")) {
+                android.os.Process.killProcess(pid);
+            }
+        }
+    }
+
     static boolean benchmark(Context context, BtcrigConfig.Basic basic, Progress progress) {
         if (!isAvailable(context) || isRunning()) return false;
         File benchmarkLog = new File(context.getFilesDir(), "xmrig-benchmark.log");
         Process benchmark = null;
+        benchmarking = true;
         try {
             File config = prepareConfig(benchmarkConfigFile(context), basic, false, false, "");
             List<String> command = command(binary(context), config, basic, benchmarkLog);
@@ -128,6 +148,7 @@ final class XmrigRunner {
             lastError = "XMRig benchmark failed: " + e.getMessage();
             return false;
         } finally {
+            benchmarking = false;
             if (benchmark != null) benchmark.destroy();
         }
     }

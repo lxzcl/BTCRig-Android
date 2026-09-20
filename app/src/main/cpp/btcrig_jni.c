@@ -2,6 +2,9 @@
 #include "btcrig_android_tls.h"
 
 #include <jni.h>
+#include <stdlib.h>
+
+#define CHALLENGE_RESULT_SIZE (128 * 1024)
 
 typedef void (*copy_string_fn)(char *, size_t);
 
@@ -157,13 +160,18 @@ Java_com_btcrig_android_BtcrigNative_benchmarkCpuChallenge(JNIEnv *env,
                                                            jint threads,
                                                            jdouble proof_difficulty) {
     (void)ignored;
-    char text[256];
+    char *text = malloc(CHALLENGE_RESULT_SIZE);
+    if (text == NULL) {
+        return (*env)->NewStringUTF(env, "{\"hashrate\":-1,\"proof_overflow\":true,\"proof_nonces\":[]}");
+    }
     const char *seed_text = seed == NULL ? NULL : (*env)->GetStringUTFChars(env, seed, NULL);
-    btcrig_core_benchmark_cpu_challenge(seed_text, seconds, threads, proof_difficulty, text, sizeof(text));
+    btcrig_core_benchmark_cpu_challenge(seed_text, seconds, threads, proof_difficulty, text, CHALLENGE_RESULT_SIZE);
     if (seed_text != NULL) {
         (*env)->ReleaseStringUTFChars(env, seed, seed_text);
     }
-    return (*env)->NewStringUTF(env, text);
+    jstring result = (*env)->NewStringUTF(env, text);
+    free(text);
+    return result;
 }
 
 JNIEXPORT jdouble JNICALL
@@ -188,17 +196,22 @@ Java_com_btcrig_android_BtcrigNative_benchmarkOpenclChallenge(JNIEnv *env,
                                                               jint seconds,
                                                               jdouble proof_difficulty) {
     (void)ignored;
-    char text[256];
+    char *text = malloc(CHALLENGE_RESULT_SIZE);
+    if (text == NULL) {
+        return (*env)->NewStringUTF(env, "{\"hashrate\":-1,\"proof_overflow\":true,\"proof_nonces\":[]}");
+    }
     const char *path = config_path == NULL ? NULL : (*env)->GetStringUTFChars(env, config_path, NULL);
     const char *seed_text = seed == NULL ? NULL : (*env)->GetStringUTFChars(env, seed, NULL);
-    btcrig_core_benchmark_opencl_challenge(path, seed_text, seconds, proof_difficulty, text, sizeof(text));
+    btcrig_core_benchmark_opencl_challenge(path, seed_text, seconds, proof_difficulty, text, CHALLENGE_RESULT_SIZE);
     if (seed_text != NULL) {
         (*env)->ReleaseStringUTFChars(env, seed, seed_text);
     }
     if (path != NULL) {
         (*env)->ReleaseStringUTFChars(env, config_path, path);
     }
-    return (*env)->NewStringUTF(env, text);
+    jstring result = (*env)->NewStringUTF(env, text);
+    free(text);
+    return result;
 }
 
 JNIEXPORT jdouble JNICALL
@@ -225,15 +238,20 @@ Java_com_btcrig_android_BtcrigNative_benchmarkCpuGpuChallenge(JNIEnv *env,
                                                               jint threads,
                                                               jdouble proof_difficulty) {
     (void)ignored;
-    char text[256];
+    char *text = malloc(CHALLENGE_RESULT_SIZE);
+    if (text == NULL) {
+        return (*env)->NewStringUTF(env, "{\"hashrate\":-1,\"proof_overflow\":true,\"proof_nonces\":[]}");
+    }
     const char *path = config_path == NULL ? NULL : (*env)->GetStringUTFChars(env, config_path, NULL);
     const char *seed_text = seed == NULL ? NULL : (*env)->GetStringUTFChars(env, seed, NULL);
-    btcrig_core_benchmark_cpu_gpu_challenge(path, seed_text, seconds, threads, proof_difficulty, text, sizeof(text));
+    btcrig_core_benchmark_cpu_gpu_challenge(path, seed_text, seconds, threads, proof_difficulty, text, CHALLENGE_RESULT_SIZE);
     if (seed_text != NULL) {
         (*env)->ReleaseStringUTFChars(env, seed, seed_text);
     }
     if (path != NULL) {
         (*env)->ReleaseStringUTFChars(env, config_path, path);
     }
-    return (*env)->NewStringUTF(env, text);
+    jstring result = (*env)->NewStringUTF(env, text);
+    free(text);
+    return result;
 }

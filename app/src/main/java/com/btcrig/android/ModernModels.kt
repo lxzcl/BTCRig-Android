@@ -40,9 +40,8 @@ internal data class OpenclInfo(val name: String, val version: String)
 
 internal data class BenchmarkProof(
     val hps: Double = -1.0,
-    val nonce: Long = 0,
-    val hash: String = "",
-    val found: Boolean = false,
+    val nonces: List<Long> = emptyList(),
+    val overflow: Boolean = false,
 )
 
 internal data class BenchmarkResult(

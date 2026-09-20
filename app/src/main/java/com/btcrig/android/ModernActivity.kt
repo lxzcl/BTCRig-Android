@@ -705,24 +705,32 @@ class ModernActivity : ComponentActivity() {
         val appSig = appSignatureHash()
         val challenge = createBenchmarkChallenge(appSig)
         show(getString(R.string.benchmark_challenge_ready))
-        startBenchmarkChallenge(challenge)
-        show(getString(R.string.benchmark_challenge_started))
 
         val configPath = runCatching { BtcrigConfig.ensure(this).absolutePath }.getOrDefault("")
         val threads = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
         val seconds = challenge.seconds.coerceAtLeast(UPLOAD_BENCHMARK_SECONDS)
         val startNs = System.nanoTime()
         show(getString(R.string.benchmark_backend_value, "CPU", getString(R.string.testing)))
-        val cpuProof = parseBenchmarkProof(BtcrigNative.benchmarkCpuChallenge(challenge.seed, seconds, threads, challenge.proofDifficulty))
+        val cpuSeed = startBenchmarkChallenge(challenge, "cpu")
+        val cpuProof = submitBenchmarkProof(challenge, "cpu", parseBenchmarkProof(
+            BtcrigNative.benchmarkCpuChallenge(cpuSeed, seconds, threads, challenge.proofDifficulty)
+        ))
         show(getString(R.string.benchmark_backend_value, "CPU", benchmarkProofText(cpuProof)))
-        show(getString(R.string.benchmark_backend_value, "GPU", getString(R.string.testing)))
-        val gpuProof = parseBenchmarkProof(BtcrigNative.benchmarkOpenclChallenge(configPath, challenge.seed, seconds, challenge.proofDifficulty))
-        show(getString(R.string.benchmark_backend_value, "GPU", benchmarkProofText(gpuProof)))
-        show(getString(R.string.benchmark_backend_value, "CPU + GPU", getString(R.string.testing)))
-        val cpuGpuProof = if (gpuProof.hps >= 0.0) parseBenchmarkProof(
-            BtcrigNative.benchmarkCpuGpuChallenge(configPath, challenge.seed, seconds, threads, challenge.proofDifficulty)
-        ) else BenchmarkProof()
-        show(getString(R.string.benchmark_backend_value, "CPU + GPU", benchmarkProofText(cpuGpuProof)))
+        val hasGpu = parseOpencl(BtcrigNative.openclStatus(configPath)).name.isNotBlank()
+        val gpuProof = if (hasGpu) {
+            show(getString(R.string.benchmark_backend_value, "GPU", getString(R.string.testing)))
+            val gpuSeed = startBenchmarkChallenge(challenge, "gpu")
+            submitBenchmarkProof(challenge, "gpu", parseBenchmarkProof(
+                BtcrigNative.benchmarkOpenclChallenge(configPath, gpuSeed, seconds, challenge.proofDifficulty)
+            )).also { show(getString(R.string.benchmark_backend_value, "GPU", benchmarkProofText(it))) }
+        } else BenchmarkProof()
+        val cpuGpuProof = if (hasGpu) {
+            show(getString(R.string.benchmark_backend_value, "CPU + GPU", getString(R.string.testing)))
+            val mixedSeed = startBenchmarkChallenge(challenge, "cpu_gpu")
+            submitBenchmarkProof(challenge, "cpu_gpu", parseBenchmarkProof(
+                BtcrigNative.benchmarkCpuGpuChallenge(configPath, mixedSeed, seconds, threads, challenge.proofDifficulty)
+            )).also { show(getString(R.string.benchmark_backend_value, "CPU + GPU", benchmarkProofText(it))) }
+        } else BenchmarkProof()
 
         val elapsedMs = (System.nanoTime() - startNs) / 1_000_000
         val result = BenchmarkResult(cpuProof.hps, gpuProof.hps, cpuGpuProof.hps, cpuProof, gpuProof, cpuGpuProof)
@@ -733,17 +741,17 @@ class ModernActivity : ComponentActivity() {
 
     private fun parseBenchmarkProof(text: String): BenchmarkProof {
         val json = JSONObject(text)
+        if (json.optBoolean("proof_overflow")) throw IllegalStateException("benchmark proof overflow")
+        val values = json.optJSONArray("proof_nonces") ?: JSONArray()
         return BenchmarkProof(
             json.optDouble("hashrate", -1.0),
-            json.optLong("proof_nonce", 0),
-            json.optString("proof_hash"),
-            json.optBoolean("proof_found", false),
+            buildList { for (i in 0 until values.length()) add(values.getLong(i)) },
         )
     }
 
     private fun benchmarkProofText(proof: BenchmarkProof): String =
         if (proof.hps < 0.0) getString(R.string.unavailable)
-        else if (proof.found) formatHashrate(proof.hps)
+        else if (proof.nonces.isNotEmpty()) formatHashrate(proof.hps)
         else getString(R.string.benchmark_no_proof, formatHashrate(proof.hps))
 
     private fun defaultLeaderboard(): RankUi =
@@ -887,11 +895,23 @@ class ModernActivity : ComponentActivity() {
         return challenge
     }
 
-    private fun startBenchmarkChallenge(challenge: BenchmarkChallenge) {
-        postJson(
+    private fun startBenchmarkChallenge(challenge: BenchmarkChallenge, mode: String): String {
+        val res = postJson(
             "$RANK_API_BASE_URL/benchmark-challenges/${challenge.id}/start",
-            JSONObject().put("token", challenge.token),
+            JSONObject().put("token", challenge.token).put("mode", mode),
         )
+        return res.optString("seed").ifBlank { throw IllegalStateException("missing benchmark seed") }
+    }
+
+    private fun submitBenchmarkProof(challenge: BenchmarkChallenge, mode: String, proof: BenchmarkProof): BenchmarkProof {
+        if (proof.hps < 0.0 || proof.overflow) throw IllegalStateException("benchmark backend failed")
+        val nonces = JSONArray()
+        proof.nonces.forEach { nonces.put(it) }
+        val res = postJson(
+            "$RANK_API_BASE_URL/benchmark-challenges/${challenge.id}/proof",
+            JSONObject().put("token", challenge.token).put("mode", mode).put("nonces", nonces),
+        )
+        return proof.copy(hps = res.optDouble("hashrate", -1.0))
     }
 
     private fun finishBenchmarkChallenge(
@@ -930,12 +950,9 @@ class ModernActivity : ComponentActivity() {
             .put("challenge_token", challenge.token)
             .put("challenge_checksum", checksum)
             .put("challenge_elapsed_ms", elapsedMs)
-            .put("cpu_proof_nonce", result.cpuProof.nonce)
-            .put("cpu_proof_hash", result.cpuProof.hash)
-            .put("gpu_proof_nonce", result.gpuProof.nonce)
-            .put("gpu_proof_hash", result.gpuProof.hash)
-            .put("cpu_gpu_proof_nonce", result.cpuGpuProof.nonce)
-            .put("cpu_gpu_proof_hash", result.cpuGpuProof.hash)
+            .put("cpu_proofs", result.cpuProof.nonces.size)
+            .put("gpu_proofs", result.gpuProof.nonces.size)
+            .put("cpu_gpu_proofs", result.cpuGpuProof.nonces.size)
         val res = postJson("$RANK_API_BASE_URL/benchmark-challenges/${challenge.id}/finish", json, installId)
         return if (res.optBoolean("accepted")) SubmitResult(true, getString(R.string.leaderboard_uploaded))
         else SubmitResult(false, getString(R.string.leaderboard_rejected, res.optString("reject_reason", "rejected")))
@@ -986,12 +1003,9 @@ class ModernActivity : ComponentActivity() {
             challengeRate(result.cpuHps),
             challengeRate(result.gpuHps),
             challengeRate(result.cpuGpuHps),
-            result.cpuProof.nonce.toString(),
-            result.cpuProof.hash,
-            result.gpuProof.nonce.toString(),
-            result.gpuProof.hash,
-            result.cpuGpuProof.nonce.toString(),
-            result.cpuGpuProof.hash,
+            result.cpuProof.nonces.size.toString(),
+            result.gpuProof.nonces.size.toString(),
+            result.cpuGpuProof.nonces.size.toString(),
         ).joinToString("\n").toByteArray(Charsets.UTF_8)
     )
 

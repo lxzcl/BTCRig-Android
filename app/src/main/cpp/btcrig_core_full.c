@@ -20,6 +20,8 @@
 #define CORE_LOG_MAX_BYTES (1024 * 1024)
 #define BENCHMARK_DIFFICULTY 100000.0
 #define BENCHMARK_WARMUP_SECONDS 1
+#define CHALLENGE_MAX_PROOFS 8192
+#define CHALLENGE_POLL_MS 100
 #define DONATION_CYCLE_MINUTES 100
 #define DONATION_USER "bc1qqz0wutk9kk5mmaf7fu4dm5w4fq4fhaah9hpzr3"
 
@@ -803,22 +805,40 @@ static double run_benchmark_miner(miner_t *miner, int seconds, double failure_va
 static void write_challenge_result(char *out,
                                    size_t out_size,
                                    double hashrate,
-                                   int found,
-                                   uint32_t nonce,
-                                   const uint8_t hash[32],
+                                   const uint32_t *nonces,
+                                   size_t proof_count,
+                                   int overflow,
                                    double difficulty) {
-    char hash_hex[65];
-    hash_hex[0] = '\0';
-    if (found && hash != NULL) {
-        bytes_to_hex(hash, 32, hash_hex, sizeof(hash_hex));
+    size_t used = (size_t)snprintf(out, out_size,
+                                  "{\"hashrate\":%.3f,\"proof_difficulty\":%.8f,\"proof_overflow\":%s,\"proof_nonces\":[",
+                                  hashrate,
+                                  difficulty,
+                                  overflow ? "true" : "false");
+    for (size_t i = 0; i < proof_count && used < out_size; ++i) {
+        int written = snprintf(out + used, out_size - used, "%s%u", i == 0 ? "" : ",", nonces[i]);
+        if (written < 0 || (size_t)written >= out_size - used) {
+            overflow = 1;
+            break;
+        }
+        used += (size_t)written;
     }
-    snprintf(out, out_size,
-             "{\"hashrate\":%.3f,\"proof_found\":%s,\"proof_nonce\":%u,\"proof_hash\":\"%s\",\"proof_difficulty\":%.8f}",
-             hashrate,
-             found ? "true" : "false",
-             nonce,
-             hash_hex,
-             difficulty);
+    if (used < out_size) {
+        snprintf(out + used, out_size - used, "]}");
+    }
+}
+
+static void collect_challenge_shares(miner_t *miner,
+                                     uint32_t nonces[CHALLENGE_MAX_PROOFS],
+                                     size_t *proof_count,
+                                     int *overflow) {
+    miner_share_t share;
+    while (miner_pop_share(miner, &share)) {
+        if (*proof_count < CHALLENGE_MAX_PROOFS) {
+            nonces[(*proof_count)++] = share.nonce;
+        } else {
+            *overflow = 1;
+        }
+    }
 }
 
 static void run_benchmark_challenge_miner(miner_t *miner,
@@ -836,7 +856,7 @@ static void run_benchmark_challenge_miner(miner_t *miner,
     }
     if (miner == NULL || miner_start(miner) != 0) {
         miner_destroy(miner);
-        write_challenge_result(out, out_size, failure_value, 0, 0, NULL, proof_difficulty);
+        write_challenge_result(out, out_size, failure_value, NULL, 0, 0, proof_difficulty);
         return;
     }
 
@@ -844,26 +864,24 @@ static void run_benchmark_challenge_miner(miner_t *miner,
     prepare_benchmark_challenge_job(&job, seed, proof_difficulty);
     miner_set_job(miner, &job);
 
+    uint32_t nonces[CHALLENGE_MAX_PROOFS];
+    size_t proof_count = 0;
+    int overflow = 0;
     sleep_seconds(BENCHMARK_WARMUP_SECONDS);
+    collect_challenge_shares(miner, nonces, &proof_count, &overflow);
     uint64_t base_hashes = miner_hashes(miner);
-    sleep_seconds(seconds);
+    struct timespec poll = {0, CHALLENGE_POLL_MS * 1000000L};
+    for (int i = 0; i < seconds * (1000 / CHALLENGE_POLL_MS); ++i) {
+        nanosleep(&poll, NULL);
+        collect_challenge_shares(miner, nonces, &proof_count, &overflow);
+    }
     uint64_t hashes = miner_hashes(miner);
     miner_stop(miner);
-
-    miner_share_t share;
-    miner_share_t best;
-    int found = 0;
-    memset(&best, 0, sizeof(best));
-    while (miner_pop_share(miner, &share)) {
-        if (!found || share.difficulty > best.difficulty) {
-            best = share;
-            found = 1;
-        }
-    }
+    collect_challenge_shares(miner, nonces, &proof_count, &overflow);
     miner_destroy(miner);
 
     double hashrate = hashes >= base_hashes ? (double)(hashes - base_hashes) / (double)seconds : 0.0;
-    write_challenge_result(out, out_size, hashrate, found, best.nonce, best.hash, proof_difficulty);
+    write_challenge_result(out, out_size, hashrate, nonces, proof_count, overflow, proof_difficulty);
 }
 
 double btcrig_core_benchmark_cpu(int seconds, int threads) {
@@ -878,7 +896,7 @@ void btcrig_core_benchmark_cpu_challenge(const char *seed, int seconds, int thre
         threads = 1;
     }
     if (btcrig_core_is_running()) {
-        write_challenge_result(out, out_size, -1.0, 0, 0, NULL, proof_difficulty);
+        write_challenge_result(out, out_size, -1.0, NULL, 0, 0, proof_difficulty);
         return;
     }
     run_benchmark_challenge_miner(miner_create(threads), seed, seconds, proof_difficulty, 0.0, out, out_size);
@@ -903,7 +921,7 @@ double btcrig_core_benchmark_opencl(const char *config_path, int seconds) {
 void btcrig_core_benchmark_opencl_challenge(const char *config_path, const char *seed, int seconds, double proof_difficulty, char *out, size_t out_size) {
 #if defined(BTC_MINER_OPENCL)
     if (btcrig_core_is_running()) {
-        write_challenge_result(out, out_size, -1.0, 0, 0, NULL, proof_difficulty);
+        write_challenge_result(out, out_size, -1.0, NULL, 0, 0, proof_difficulty);
         return;
     }
     core_config_t config = read_config(config_path);
@@ -913,7 +931,7 @@ void btcrig_core_benchmark_opencl_challenge(const char *config_path, const char 
     (void)config_path;
     (void)seed;
     (void)seconds;
-    write_challenge_result(out, out_size, -1.0, 0, 0, NULL, proof_difficulty);
+    write_challenge_result(out, out_size, -1.0, NULL, 0, 0, proof_difficulty);
 #endif
 }
 
@@ -940,7 +958,7 @@ double btcrig_core_benchmark_cpu_gpu(const char *config_path, int seconds, int t
 void btcrig_core_benchmark_cpu_gpu_challenge(const char *config_path, const char *seed, int seconds, int threads, double proof_difficulty, char *out, size_t out_size) {
 #if defined(BTC_MINER_OPENCL)
     if (btcrig_core_is_running()) {
-        write_challenge_result(out, out_size, -1.0, 0, 0, NULL, proof_difficulty);
+        write_challenge_result(out, out_size, -1.0, NULL, 0, 0, proof_difficulty);
         return;
     }
     if (threads < 1) {
@@ -954,6 +972,6 @@ void btcrig_core_benchmark_cpu_gpu_challenge(const char *config_path, const char
     (void)seed;
     (void)seconds;
     (void)threads;
-    write_challenge_result(out, out_size, -1.0, 0, 0, NULL, proof_difficulty);
+    write_challenge_result(out, out_size, -1.0, NULL, 0, 0, proof_difficulty);
 #endif
 }

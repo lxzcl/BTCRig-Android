@@ -63,6 +63,8 @@ internal data class BenchmarkChallenge(
     val proofDifficulty: Double,
 )
 
+internal data class BenchmarkPhase(val seed: String, val proofDifficulty: Double)
+
 internal data class RankUi(
     val title: String,
     val message: String = "",

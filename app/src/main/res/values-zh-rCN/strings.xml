@@ -98,6 +98,7 @@
     <string name="rank_detail_recommended">推荐后端</string>
     <string name="rank_detail_samples">样本数</string>
     <string name="rank_detail_signed_samples">签名样本</string>
+	<string name="rank_detail_official_samples">官方构建</string>
     <string name="rank_detail_device">设备</string>
     <string name="rank_detail_soc">SoC</string>
     <string name="rank_detail_gpu">GPU</string>

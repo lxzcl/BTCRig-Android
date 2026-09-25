@@ -711,24 +711,24 @@ class ModernActivity : ComponentActivity() {
         val seconds = challenge.seconds.coerceAtLeast(UPLOAD_BENCHMARK_SECONDS)
         val startNs = System.nanoTime()
         show(getString(R.string.benchmark_backend_value, "CPU", getString(R.string.testing)))
-        val cpuSeed = startBenchmarkChallenge(challenge, "cpu")
+		val cpuPhase = startBenchmarkChallenge(challenge, "cpu", BtcrigNative.benchmarkCpu(1, threads))
         val cpuProof = submitBenchmarkProof(challenge, "cpu", parseBenchmarkProof(
-            BtcrigNative.benchmarkCpuChallenge(cpuSeed, seconds, threads, challenge.proofDifficulty)
+			BtcrigNative.benchmarkCpuChallenge(cpuPhase.seed, seconds, threads, cpuPhase.proofDifficulty)
         ))
         show(getString(R.string.benchmark_backend_value, "CPU", benchmarkProofText(cpuProof)))
         val hasGpu = parseOpencl(BtcrigNative.openclStatus(configPath)).name.isNotBlank()
         val gpuProof = if (hasGpu) {
             show(getString(R.string.benchmark_backend_value, "GPU", getString(R.string.testing)))
-            val gpuSeed = startBenchmarkChallenge(challenge, "gpu")
+			val gpuPhase = startBenchmarkChallenge(challenge, "gpu", BtcrigNative.benchmarkOpencl(configPath, 1))
             submitBenchmarkProof(challenge, "gpu", parseBenchmarkProof(
-                BtcrigNative.benchmarkOpenclChallenge(configPath, gpuSeed, seconds, challenge.proofDifficulty)
+				BtcrigNative.benchmarkOpenclChallenge(configPath, gpuPhase.seed, seconds, gpuPhase.proofDifficulty)
             )).also { show(getString(R.string.benchmark_backend_value, "GPU", benchmarkProofText(it))) }
         } else BenchmarkProof()
         val cpuGpuProof = if (hasGpu) {
             show(getString(R.string.benchmark_backend_value, "CPU + GPU", getString(R.string.testing)))
-            val mixedSeed = startBenchmarkChallenge(challenge, "cpu_gpu")
+			val mixedPhase = startBenchmarkChallenge(challenge, "cpu_gpu", BtcrigNative.benchmarkCpuGpu(configPath, 1, threads))
             submitBenchmarkProof(challenge, "cpu_gpu", parseBenchmarkProof(
-                BtcrigNative.benchmarkCpuGpuChallenge(configPath, mixedSeed, seconds, threads, challenge.proofDifficulty)
+				BtcrigNative.benchmarkCpuGpuChallenge(configPath, mixedPhase.seed, seconds, threads, mixedPhase.proofDifficulty)
             )).also { show(getString(R.string.benchmark_backend_value, "CPU + GPU", benchmarkProofText(it))) }
         } else BenchmarkProof()
 
@@ -822,6 +822,7 @@ class ModernActivity : ComponentActivity() {
             getString(R.string.rank_detail_line, getString(label), value.ifBlank { "--" })
         val samples = row.optInt("samples", 0)
         val signed = row.optInt("signed_samples", 0)
+		val official = row.optInt("official_samples", 0)
         val signHash = row.optString("app_signature_hash").take(16).ifBlank { "--" }
         return listOf(
             line(R.string.rank_detail_rank, "#${row.optInt("rank")}"),
@@ -829,6 +830,7 @@ class ModernActivity : ComponentActivity() {
             line(R.string.rank_detail_recommended, row.optString("recommended")),
             line(R.string.rank_detail_samples, samples.toString()),
             line(R.string.rank_detail_signed_samples, "$signed/$samples"),
+			line(R.string.rank_detail_official_samples, "$official/$samples"),
             line(R.string.rank_detail_device, row.optString("device_name").ifBlank { name }),
             line(R.string.rank_detail_soc, row.optString("soc_name")),
             line(R.string.rank_detail_gpu, shortGpuName(row.optString("gpu_name"))),
@@ -895,12 +897,19 @@ class ModernActivity : ComponentActivity() {
         return challenge
     }
 
-    private fun startBenchmarkChallenge(challenge: BenchmarkChallenge, mode: String): String {
+	private fun startBenchmarkChallenge(challenge: BenchmarkChallenge, mode: String, expectedHashrate: Double): BenchmarkPhase {
         val res = postJson(
             "$RANK_API_BASE_URL/benchmark-challenges/${challenge.id}/start",
-            JSONObject().put("token", challenge.token).put("mode", mode),
+			JSONObject()
+				.put("token", challenge.token)
+				.put("mode", mode)
+				.put("adaptive", true)
+				.put("expected_hashrate", expectedHashrate.coerceAtLeast(0.0)),
         )
-        return res.optString("seed").ifBlank { throw IllegalStateException("missing benchmark seed") }
+		return BenchmarkPhase(
+			res.optString("seed").ifBlank { throw IllegalStateException("missing benchmark seed") },
+			res.optDouble("proof_difficulty", challenge.proofDifficulty),
+		)
     }
 
     private fun submitBenchmarkProof(challenge: BenchmarkChallenge, mode: String, proof: BenchmarkProof): BenchmarkProof {

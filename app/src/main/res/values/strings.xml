@@ -98,6 +98,7 @@
     <string name="rank_detail_recommended">Recommended</string>
     <string name="rank_detail_samples">Samples</string>
     <string name="rank_detail_signed_samples">Signed samples</string>
+	<string name="rank_detail_official_samples">Official builds</string>
     <string name="rank_detail_device">Device</string>
     <string name="rank_detail_soc">SoC</string>
     <string name="rank_detail_gpu">GPU</string>

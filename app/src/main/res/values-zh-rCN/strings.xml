@@ -169,6 +169,7 @@
     <string name="benchmark_backend_value">%1$s：%2$s</string>
     <string name="testing">测试中...</string>
     <string name="opencl_diagnostics">OpenCL 诊断</string>
+	<string name="copy_diagnostics">复制诊断</string>
     <string name="opencl_diag_disabled">设置中没有启用 GPU 挖矿。</string>
     <string name="opencl_diag_not_built">当前 APK 没有编译 OpenCL 支持。</string>
     <string name="opencl_diag_unavailable">OpenCL 运行库或设备不可用：%1$s</string>

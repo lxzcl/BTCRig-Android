@@ -129,7 +129,7 @@ Java_com_btcrig_android_BtcrigNative_lastError(JNIEnv *env, jclass ignored) {
 JNIEXPORT jstring JNICALL
 Java_com_btcrig_android_BtcrigNative_openclStatus(JNIEnv *env, jclass ignored, jstring config_path) {
     (void)ignored;
-    char text[2048];
+    char text[8192];
     const char *path = config_path == NULL ? NULL : (*env)->GetStringUTFChars(env, config_path, NULL);
     btcrig_core_copy_opencl_status(path, text, sizeof(text));
     if (path != NULL) {

@@ -169,6 +169,7 @@
     <string name="benchmark_backend_value">%1$s: %2$s</string>
     <string name="testing">testing...</string>
     <string name="opencl_diagnostics">OpenCL diagnostics</string>
+	<string name="copy_diagnostics">Copy diagnostics</string>
     <string name="opencl_diag_disabled">GPU mining is disabled in settings.</string>
     <string name="opencl_diag_not_built">This APK was built without OpenCL support.</string>
     <string name="opencl_diag_unavailable">OpenCL runtime or device is unavailable: %1$s</string>

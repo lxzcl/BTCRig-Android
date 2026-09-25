@@ -706,6 +706,13 @@ static int device_prefers_legacy_noatomic(const char *vendor,
     return string_contains_ci(name, "caicos");
 }
 
+static int device_prefers_compact_kernel(const char *vendor, const char *name) {
+    return string_contains_ci(vendor, "arm") ||
+        string_contains_ci(name, "mali") ||
+        string_contains_ci(vendor, "imagination") ||
+        string_contains_ci(name, "powervr");
+}
+
 static void apply_legacy_noatomic_limits(miner_opencl_device_config_t *device) {
     if (device == NULL || device->kernel_variant != MINER_OPENCL_KERNEL_LEGACY_NOATOMIC) {
         return;
@@ -718,10 +725,10 @@ static void apply_legacy_noatomic_limits(miner_opencl_device_config_t *device) {
     }
 }
 
-static void apply_legacy_noatomic_device_info(miner_opencl_device_config_t *device,
-                                              const char *vendor,
-                                              const char *name,
-                                              const char *version) {
+static void apply_device_kernel_defaults(miner_opencl_device_config_t *device,
+                                         const char *vendor,
+                                         const char *name,
+                                         const char *version) {
     if (device == NULL) {
         return;
     }
@@ -755,6 +762,8 @@ static uint32_t default_local_work_size_for_device(const char *vendor,
     uint32_t preferred = 256U;
 
     if (device_prefers_legacy_noatomic(vendor, name, NULL)) {
+        preferred = 64U;
+    } else if (device_prefers_compact_kernel(vendor, name)) {
         preferred = 64U;
     } else if (string_contains_ci(vendor, "intel") || string_contains_ci(name, "intel")) {
         preferred = 128U;
@@ -1095,7 +1104,7 @@ int opencl_miner_resolve_devices(const miner_opencl_config_t *config,
                 (void)clGetDeviceInfo(device, CL_DEVICE_NAME, sizeof(name), name, NULL);
                 (void)clGetDeviceInfo(device, CL_DEVICE_VENDOR, sizeof(vendor), vendor, NULL);
                 (void)clGetDeviceInfo(device, CL_DEVICE_VERSION, sizeof(version), version, NULL);
-                apply_legacy_noatomic_device_info(&devices_out[0], vendor, name, version);
+                apply_device_kernel_defaults(&devices_out[0], vendor, name, version);
             }
         }
         apply_legacy_noatomic_limits(&devices_out[0]);
@@ -1175,7 +1184,7 @@ int opencl_miner_resolve_devices(const miner_opencl_config_t *config,
                 (void)clGetDeviceInfo(devices[d], CL_DEVICE_NAME, sizeof(name), name, NULL);
                 (void)clGetDeviceInfo(devices[d], CL_DEVICE_VENDOR, sizeof(vendor), vendor, NULL);
                 (void)clGetDeviceInfo(devices[d], CL_DEVICE_VERSION, sizeof(version), version, NULL);
-                apply_legacy_noatomic_device_info(&devices_out[found], vendor, name, version);
+                apply_device_kernel_defaults(&devices_out[found], vendor, name, version);
                 ++found;
             }
 
@@ -1261,10 +1270,22 @@ int opencl_miner_describe_devices(const miner_opencl_config_t *config,
         char vendor[128] = "";
         char version[128] = "";
         cl_device_type type = 0;
+        cl_uint compute_units = 0;
+        cl_uint clock_mhz = 0;
+        cl_uint address_bits = 0;
+        cl_ulong global_mem = 0;
+        cl_ulong local_mem = 0;
+        size_t max_work_group = 0;
         (void)clGetDeviceInfo(device, CL_DEVICE_NAME, sizeof(name), name, NULL);
         (void)clGetDeviceInfo(device, CL_DEVICE_VENDOR, sizeof(vendor), vendor, NULL);
         (void)clGetDeviceInfo(device, CL_DEVICE_VERSION, sizeof(version), version, NULL);
         (void)clGetDeviceInfo(device, CL_DEVICE_TYPE, sizeof(type), &type, NULL);
+        (void)clGetDeviceInfo(device, CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(compute_units), &compute_units, NULL);
+        (void)clGetDeviceInfo(device, CL_DEVICE_MAX_CLOCK_FREQUENCY, sizeof(clock_mhz), &clock_mhz, NULL);
+        (void)clGetDeviceInfo(device, CL_DEVICE_ADDRESS_BITS, sizeof(address_bits), &address_bits, NULL);
+        (void)clGetDeviceInfo(device, CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(global_mem), &global_mem, NULL);
+        (void)clGetDeviceInfo(device, CL_DEVICE_LOCAL_MEM_SIZE, sizeof(local_mem), &local_mem, NULL);
+        (void)clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(max_work_group), &max_work_group, NULL);
 
         char backend_error[256];
         backend_error[0] = '\0';
@@ -1273,19 +1294,33 @@ int opencl_miner_describe_devices(const miner_opencl_config_t *config,
                                               resolved[i].backend_variant,
                                               backend_error,
                                               sizeof(backend_error));
+        int kernel = resolved[i].kernel_variant;
+        if (kernel == MINER_OPENCL_KERNEL_AUTO && device_prefers_compact_kernel(vendor, name)) {
+            kernel = MINER_OPENCL_KERNEL_COMPACT;
+        }
+        uint32_t local_work_size = resolved[i].local_work_size;
+        if (local_work_size == 0) {
+            local_work_size = default_local_work_size_for_device(vendor, name, max_work_group);
+        }
         append_text(out,
                     out_size,
-                    "\n#%d %s / %s / %s / %s / backend=%s / kernel=%s / batch=%u / local=%u / npi=%u",
+                    "\n#%d %s / %s / %s / %s / backend=%s / kernel=%s / batch=%u / local=%u / npi=%u / compute=%u / clock=%uMHz / global=%lluMiB / local-mem=%lluKiB / max-group=%zu / address=%ubit",
                     i,
                     opencl_device_type_name(type),
                     vendor[0] != '\0' ? vendor : "unknown vendor",
                     name[0] != '\0' ? name : "unknown device",
                     version[0] != '\0' ? version : "unknown version",
                     backend >= 0 ? opencl_backend_variant_name(backend) : opencl_backend_variant_name(resolved[i].backend_variant),
-                    opencl_kernel_variant_name(resolved[i].kernel_variant),
+                    opencl_kernel_variant_name(kernel),
                     resolved[i].batch_size,
-                    resolved[i].local_work_size,
-                    resolved[i].nonces_per_work_item);
+                    local_work_size,
+                    resolved[i].nonces_per_work_item,
+                    compute_units,
+                    clock_mhz,
+                    (unsigned long long)(global_mem / (1024U * 1024U)),
+                    (unsigned long long)(local_mem / 1024U),
+                    max_work_group,
+                    address_bits);
         if (backend < 0 && backend_error[0] != '\0') {
             append_text(out, out_size, " / backend warning: %s", backend_error);
         }
@@ -1467,6 +1502,9 @@ opencl_miner_t *opencl_miner_create(const miner_opencl_config_t *config,
             opencl_miner_destroy(miner);
             return NULL;
         }
+    } else if (requested_kernel_variant == MINER_OPENCL_KERNEL_AUTO &&
+               device_prefers_compact_kernel(miner->device_vendor, miner->device_name)) {
+        miner->kernel_variant = MINER_OPENCL_KERNEL_COMPACT;
     }
     if (miner->kernel_variant == MINER_OPENCL_KERNEL_LEGACY_NOATOMIC &&
         miner->batch_size > OPENCL_LEGACY_NOATOMIC_MAX_BATCH_SIZE) {

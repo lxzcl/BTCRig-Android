@@ -903,11 +903,11 @@ private fun InfoPage(
         Line(stringResource(R.string.config_log_value, ui.configPath, ui.logPath))
     }
     if (ui.engine == "btcrig") {
-		OpenclDiagnosticCard(
-			ui.openclDiagnosis,
-			ui.opencl,
-			"BTCRig ${ui.version}\nBackend: ${ui.backend}\nCPU: ${ui.cpuSummary}\n${ui.opencl}",
-		)
+        OpenclDiagnosticCard(
+            ui.openclDiagnosis,
+            ui.opencl,
+            "BTCRig ${ui.version}\nBackend: ${ui.backend}\nCPU: ${ui.cpuSummary}\n${ui.opencl}",
+        )
     }
     DonationCard(
         percent = basic.donationPercent,
@@ -920,7 +920,7 @@ private fun InfoPage(
 
 @Composable
 private fun OpenclDiagnosticCard(diagnosis: String, rawStatus: String, report: String) {
-	val context = LocalContext.current
+    val context = LocalContext.current
     SettingSection(stringResource(R.string.opencl_diagnostics), compact = true) {
         Line(diagnosis)
         Text(
@@ -930,14 +930,14 @@ private fun OpenclDiagnosticCard(diagnosis: String, rawStatus: String, report: S
             fontSize = 12.sp,
             lineHeight = 16.sp,
         )
-		RigButton(
-			text = stringResource(R.string.copy_diagnostics),
-			onClick = {
-				val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-				clipboard.setPrimaryClip(ClipData.newPlainText("BTCRig OpenCL", report))
-				Toast.makeText(context, context.getString(R.string.copied_to_clipboard), Toast.LENGTH_SHORT).show()
-			},
-		)
+        RigButton(
+            text = stringResource(R.string.copy_diagnostics),
+            onClick = {
+                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                clipboard.setPrimaryClip(ClipData.newPlainText("BTCRig OpenCL", report))
+                Toast.makeText(context, context.getString(R.string.copied_to_clipboard), Toast.LENGTH_SHORT).show()
+            },
+        )
     }
 }
 

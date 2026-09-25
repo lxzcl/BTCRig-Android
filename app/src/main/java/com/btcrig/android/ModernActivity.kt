@@ -809,28 +809,48 @@ class ModernActivity : ComponentActivity() {
                 else -> row.optDouble("max_hashrate")
             }
         }
-        return RankUiRow(
+		val samples = row.optInt("samples", 0)
+		val official = row.optInt("official_samples", 0)
+		val badges = buildList {
+			if (official > 0 && official == samples) add(getString(R.string.rank_official))
+			if (samples < 3) add(getString(R.string.rank_provisional))
+		}
+		return RankUiRow(
             row.optInt("rank", fallbackRank),
-            name.ifBlank { getString(R.string.unknown_device) },
+			(listOf(name.ifBlank { getString(R.string.unknown_device) }) + badges).joinToString(" · "),
             formatHashrate(rate),
-            rankDetail(row, name, rate),
+			rankDetail(row, name, rate, nameMode),
         )
     }
 
-    private fun rankDetail(row: JSONObject, name: String, rate: Double): String {
+	private fun rankDetail(row: JSONObject, name: String, rate: Double, mode: String): String {
         fun line(label: Int, value: String): String =
             getString(R.string.rank_detail_line, getString(label), value.ifBlank { "--" })
         val samples = row.optInt("samples", 0)
         val signed = row.optInt("signed_samples", 0)
 		val official = row.optInt("official_samples", 0)
         val signHash = row.optString("app_signature_hash").take(16).ifBlank { "--" }
+		val proofs = row.optInt(when (mode) {
+			"gpu" -> "gpu_proofs"
+			"cpu_gpu" -> "cpu_gpu_proofs"
+			else -> "cpu_proofs"
+		})
+		val variation = row.optDouble(when (mode) {
+			"gpu" -> "gpu_variation_percent"
+			"cpu_gpu" -> "cpu_gpu_variation_percent"
+			else -> "cpu_variation_percent"
+		})
         return listOf(
             line(R.string.rank_detail_rank, "#${row.optInt("rank")}"),
             line(R.string.rank_detail_score, formatHashrate(rate)),
             line(R.string.rank_detail_recommended, row.optString("recommended")),
             line(R.string.rank_detail_samples, samples.toString()),
             line(R.string.rank_detail_signed_samples, "$signed/$samples"),
-			line(R.string.rank_detail_official_samples, "$official/$samples"),
+            line(R.string.rank_detail_official_samples, "$official/$samples"),
+			line(R.string.rank_detail_status, getString(if (samples < 3) R.string.rank_provisional else R.string.rank_stable)),
+			line(R.string.rank_detail_proofs, proofs.toString()),
+			line(R.string.rank_detail_duration, getString(R.string.seconds_value, row.optInt("duration_sec", 0))),
+			line(R.string.rank_detail_variation, String.format(Locale.US, "%.1f%%", variation)),
             line(R.string.rank_detail_device, row.optString("device_name").ifBlank { name }),
             line(R.string.rank_detail_soc, row.optString("soc_name")),
             line(R.string.rank_detail_gpu, shortGpuName(row.optString("gpu_name"))),

@@ -99,6 +99,14 @@
     <string name="rank_detail_samples">Samples</string>
     <string name="rank_detail_signed_samples">Signed samples</string>
 	<string name="rank_detail_official_samples">Official builds</string>
+	<string name="rank_detail_status">Status</string>
+	<string name="rank_detail_proofs">Verified proofs</string>
+	<string name="rank_detail_duration">Test duration</string>
+	<string name="rank_detail_variation">Score range</string>
+	<string name="rank_official">Official</string>
+	<string name="rank_provisional">Provisional</string>
+	<string name="rank_stable">Stable</string>
+	<string name="seconds_value">%1$d s</string>
     <string name="rank_detail_device">Device</string>
     <string name="rank_detail_soc">SoC</string>
     <string name="rank_detail_gpu">GPU</string>

@@ -99,6 +99,14 @@
     <string name="rank_detail_samples">样本数</string>
     <string name="rank_detail_signed_samples">签名样本</string>
 	<string name="rank_detail_official_samples">官方构建</string>
+	<string name="rank_detail_status">状态</string>
+	<string name="rank_detail_proofs">有效证明</string>
+	<string name="rank_detail_duration">测试时长</string>
+	<string name="rank_detail_variation">成绩波动范围</string>
+	<string name="rank_official">官方</string>
+	<string name="rank_provisional">暂定</string>
+	<string name="rank_stable">稳定</string>
+	<string name="seconds_value">%1$d 秒</string>
     <string name="rank_detail_device">设备</string>
     <string name="rank_detail_soc">SoC</string>
     <string name="rank_detail_gpu">GPU</string>
